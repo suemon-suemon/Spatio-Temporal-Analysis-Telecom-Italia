@@ -5,6 +5,7 @@ __pycache__/
 
 # Darts
 darts_logs/
+experiments/results/
 
 # C extensions
 *.so
