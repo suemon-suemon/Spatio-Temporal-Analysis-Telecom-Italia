@@ -7,6 +7,10 @@ __pycache__/
 darts_logs/
 experiments/results/
 
+# pytorch-lightning & wandb
+wandb/
+spatio-temporal prediction/
+
 # C extensions
 *.so
 

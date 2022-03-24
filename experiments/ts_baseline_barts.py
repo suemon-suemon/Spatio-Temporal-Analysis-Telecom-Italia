@@ -1,18 +1,17 @@
 import os
 import time
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from darts import TimeSeries
 from darts.dataprocessing.transformers import MissingValuesFiller, Scaler
 from darts.metrics import mase, rmse
-from darts.models import ARIMA, NaiveDrift, NaiveSeasonal, NBEATSModel, ExponentialSmoothing, AutoARIMA, FourTheta
+from darts.models import (ARIMA, AutoARIMA, ExponentialSmoothing, FourTheta,
+                          NaiveDrift, NaiveSeasonal, NBEATSModel)
 from darts.utils.utils import SeasonalityMode
-from sklearn.preprocessing import MaxAbsScaler
 from numpy.random import default_rng
+from sklearn.preprocessing import MaxAbsScaler
 from tqdm import tqdm
-
 from utils.load_data import load_multi_telecom_data
 from utils.manipulate_data import df2cell_time_array, df2timeindex
 
