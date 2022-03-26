@@ -6,17 +6,24 @@ import numpy as np
 import pandas as pd
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
-from utils.load_data import load_and_save_telecom_data_by_tele, load_grid_data
+from utils.load_data import load_and_save_telecom_data_by_tele, load_part_grid_data
 
 
 class Milan(LightningDataModule):
-    def __init__(self, data_dir: str = 'data/sms-call-internet-mi', tele_column: str = 'internet', batch_size: int = 64):
+    def __init__(self, 
+                 data_dir: str = 'data/sms-call-internet-mi',
+                 in_len: int = 12, 
+                 out_len: int = 1, 
+                 batch_size: int = 64, 
+                 tele_column: str = 'internet',):
         super().__init__()
         self.data_dir = data_dir
         assert tele_column in ['internet',
                                'smsin', 'smsout', 'callin', 'callout']
         self.tele_column = tele_column
         self.batch_size = batch_size
+        self.in_len = in_len
+        self.out_len = out_len
 
         self.dataset_start_date = {'year': 2013, 'month': 11, 'day': 1}
         self.dataset_end_date = {'year': 2013, 'month': 11, 'day': 31}
@@ -58,24 +65,29 @@ class Milan(LightningDataModule):
                 self.data_dir))
 
     def setup(self, stage: Optional[str] = None) -> None:
-        milan_grid_data, milan_df = load_grid_data(self.data_dir)
+        milan_grid_data, milan_df = load_part_grid_data(self.data_dir, col1=41, col2=70, row1=41, row2=70)
         train_len = milan_df['time'][milan_df['time'] < pd.Timestamp(
-            **self.test_split_date)].unique().shape[0]
+            **self.val_split_date)].unique().shape[0]
         val_len = milan_df['time'][(milan_df['time'] >= pd.Timestamp(
             **self.val_split_date)) & (milan_df['time'] < pd.Timestamp(**self.test_split_date))].unique().shape[0]
         milan_train, milan_val, milan_test = Milan.train_test_split(milan_grid_data, train_len, val_len)
-        self.milan_train = milan_train.reshape(-1, 100, 100)
-        self.milan_val = milan_val.reshape(-1, 100, 100)
-        self.milan_test = milan_test.reshape(-1, 100, 100)
+        self.milan_train = milan_train.reshape(-1, 30, 30)
+        self.milan_val = milan_val.reshape(-1, 30, 30)
+        self.milan_test = milan_test.reshape(-1, 30, 30)
 
     def train_dataloader(self):
-        return DataLoader(MilanDataset(self.milan_train), batch_size=self.batch_size, shuffle=True, num_workers=4)
+        milan_train = MilanDataset(self.milan_train, segment_size=self.in_len)
+        print("length of milan training dataset: ", len(milan_train))
+        return DataLoader(milan_train, batch_size=self.batch_size, shuffle=False, num_workers=4)
 
     def val_dataloader(self):
-        return DataLoader(MilanDataset(self.milan_val), batch_size=self.batch_size, shuffle=False, num_workers=4)
+        return DataLoader(MilanDataset(self.milan_val, segment_size=self.in_len), batch_size=self.batch_size, shuffle=False, num_workers=4)
 
     def test_dataloader(self):
-        return DataLoader(MilanDataset(self.milan_test), shuffle=False, num_workers=8)
+        return DataLoader(MilanDataset(self.milan_test, segment_size=self.in_len), batch_size=self.batch_size, shuffle=False, num_workers=4)
+
+    def predict_dataloader(self):
+        return DataLoader(MilanDataset(self.milan_test, segment_size=self.in_len), batch_size=self.batch_size, shuffle=False, num_workers=4)
 
 
 class MilanDataset(Dataset):
@@ -107,4 +119,4 @@ class MilanDataset(Dataset):
                                 n_row:n_row+self.window_size,
                                 n_col:n_col+self.window_size]
         X = X.reshape((self.segment_size, self.window_size * self.window_size))
-        return (X, self.milan_data[n_slice+self.segment_size, n_row, n_col])
+        return (X, self.milan_data[n_slice+self.segment_size, n_row, n_col].reshape(-1))
