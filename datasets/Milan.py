@@ -1,5 +1,4 @@
 import os
-from tkinter import N
 from typing import Optional
 
 import numpy as np

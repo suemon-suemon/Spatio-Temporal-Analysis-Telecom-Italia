@@ -6,8 +6,8 @@ import os
 
 import numpy as np
 import torch
-from datasets.milan import Milan
-from models.lstm import LSTMRegressor
+from datasets import Milan
+from models import LSTMRegressor
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
     seed_everything(42)
-    wandb_logger = WandbLogger(project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(project="spatio-temporal prediction", id='1obvx0gb', resume=True)
 
     p = dict(
         batch_size = 1024,
@@ -30,13 +30,13 @@ if __name__ == "__main__":
         max_epochs = 500,
 
         criterion = nn.MSELoss(),
-        
-        seq_len = 12,
-        n_features = 121,
-        emb_size = 64,
-        hidden_size = 32,
-        num_layers = 2,
-        dropout = 0.2,
+
+        n_features = 121,        
+        seq_len = 21,
+        emb_size = 120,
+        hidden_size = 75,
+        num_layers = 4,
+        dropout = 0.1092,
     )
 
     dm = Milan(
@@ -58,20 +58,20 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval='step')
     trainer = Trainer(
         max_epochs=p['max_epochs'],
-        # logger=wandb_logger,
+        logger=wandb_logger,
         gpus=1,
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
     )
 
-    trainer.fit(model, dm)
-    trainer.test(model, datamodule=dm)
+    # trainer.fit(model, dm)
+    trainer.test(model, datamodule=dm, ckpt_path="spatio-temporal prediction/1obvx0gb/checkpoints/epoch=199-step=401399.ckpt")
 
-    # calculate metrics
-    preds = trainer.predict(model, datamodule=dm)
-    preds = torch.cat(preds).reshape(-1, 900)
-    gt = dm.milan_test[p['seq_len']:].reshape(-1, 900)
-    mae = np.mean([mean_absolute_error(gt[i, :], preds[i, :]) for i in range(gt.shape[0])])
-    mape = np.mean([mean_absolute_percentage_error(gt[i, :], preds[i, :]) for i in range(gt.shape[0])])
-    nrmse = nrmse(gt, preds)
+    # # calculate metrics
+    # preds = trainer.predict(model, datamodule=dm)
+    # preds = torch.cat(preds).reshape(-1, 900)
+    # gt = dm.milan_test[p['seq_len']:].reshape(-1, 900)
+    # mae = np.mean([mean_absolute_error(gt[i, :], preds[i, :]) for i in range(gt.shape[0])])
+    # mape = np.mean([mean_absolute_percentage_error(gt[i, :], preds[i, :]) for i in range(gt.shape[0])])
+    # nrmse = nrmse(gt, preds)
 
-    print('Method: ', 'LSTM', 'MAE: ', mae, ' MAPE: ', mape, ' NRMSE: ', nrmse)
+    # print('Method: ', 'LSTM', 'MAE: ', mae, ' MAPE: ', mape, ' NRMSE: ', nrmse)

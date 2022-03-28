@@ -2,6 +2,10 @@ import torch
 from pytorch_lightning import LightningModule
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torchmetrics import (MeanAbsoluteError, MeanAbsolutePercentageError,
+                          MeanSquaredError,
+                          SymmetricMeanAbsolutePercentageError)
+
 
 class LSTMRegressor(LightningModule):
     '''
@@ -39,6 +43,15 @@ class LSTMRegressor(LightningModule):
                             batch_first=True)
         self.linear = nn.Linear(hidden_size, 1)
         self.save_hyperparameters()
+
+        self.valid_MAE = MeanAbsoluteError()
+        self.valid_MAPE = MeanAbsolutePercentageError()
+        self.valid_SMAPE = SymmetricMeanAbsolutePercentageError()
+        self.valid_RMSE = MeanSquaredError(squared=False)
+        self.test_MAE = MeanAbsoluteError()
+        self.test_MAPE = MeanAbsolutePercentageError()
+        self.test_SMAPE = SymmetricMeanAbsolutePercentageError()
+        self.test_RMSE = MeanSquaredError(squared=False)
         
     def forward(self, x):
         if self.is_input_embedding:
@@ -67,13 +80,29 @@ class LSTMRegressor(LightningModule):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, on_epoch=True)
+        self.valid_MAE(y_hat, y)
+        self.log('val_MAE', self.valid_MAE, on_epoch=True)
+        self.valid_MAPE(y_hat, y)
+        self.log('val_MAPE', self.valid_MAPE, on_epoch=True)
+        self.valid_RMSE(y_hat, y)
+        self.log('val_RMSE', self.valid_RMSE, on_epoch=True)
+        self.valid_SMAPE(y_hat, y)
+        self.log('val_SMAPE', self.valid_SMAPE, on_epoch=True)
     
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
         self.log('test_loss', loss)
+        self.test_MAE(y_hat, y)
+        self.log('test_MAE', self.test_MAE, on_epoch=True)
+        self.test_MAPE(y_hat, y)
+        self.log('test_MAPE', self.test_MAPE, on_epoch=True)
+        self.test_RMSE(y_hat, y)
+        self.log('test_RMSE', self.test_RMSE, on_epoch=True)
+        self.test_SMAPE(y_hat, y)
+        self.log('test_SMAPE', self.test_SMAPE, on_epoch=True)
 
     def predict_step(self, batch, batch_idx):
         x, y = batch
