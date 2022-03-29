@@ -17,7 +17,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from optuna.integration import PyTorchLightningPruningCallback
 
 from models import LSTMRegressor
-from datasets import Milan
+from datasets import MilanSW
 
 MAX_EPOCHS = 200
 
@@ -31,7 +31,7 @@ def create_LSTM_dm(trial):
     is_input_emb = trial.suggest_categorical("is_input_emb", [True, False])
     trial.set_user_attr("batch_size", 1024)
     print(emb_size, hidden_size, seq_len, num_layers, dropout, learning_rate, is_input_emb)
-    dm = Milan(batch_size=trial.user_attrs['batch_size'], in_len=seq_len, out_len=1)
+    dm = MilanSW(batch_size=trial.user_attrs['batch_size'], in_len=seq_len, out_len=1)
     model = LSTMRegressor(n_features=121, 
                          emb_size=emb_size, 
                          hidden_size=hidden_size, 

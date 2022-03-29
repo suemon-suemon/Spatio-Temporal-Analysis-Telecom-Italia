@@ -4,17 +4,13 @@ fix_python_path_if_working_locally()
 
 import os
 
-import numpy as np
-import torch
-from datasets import Milan
+from datasets import MilanSW
 from models import LSTMRegressor
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from torch import nn
-from utils.nrmse import nrmse
 
 
 if __name__ == "__main__":
@@ -22,24 +18,23 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
     seed_everything(42)
-    wandb_logger = WandbLogger(project="spatio-temporal prediction", id='1obvx0gb', resume=True)
+    # wandb_logger = WandbLogger(project="spatio-temporal prediction", id='3mktckfm', resume=True)
 
     p = dict(
         batch_size = 1024,
         learning_rate = 1e-3,
-        max_epochs = 500,
-
+        max_epochs = 2,
         criterion = nn.MSELoss(),
 
         n_features = 121,        
-        seq_len = 21,
-        emb_size = 120,
-        hidden_size = 75,
-        num_layers = 4,
-        dropout = 0.1092,
+        seq_len = 121,
+        emb_size = 74,
+        hidden_size = 35,
+        num_layers = 3,
+        dropout = 0.2081,
     )
 
-    dm = Milan(
+    dm = MilanSW(
         batch_size=p['batch_size'], 
         in_len=p['seq_len'], 
         out_len=1
@@ -58,13 +53,13 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval='step')
     trainer = Trainer(
         max_epochs=p['max_epochs'],
-        logger=wandb_logger,
+        # logger=wandb_logger,
         gpus=1,
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
     )
 
-    # trainer.fit(model, dm)
-    trainer.test(model, datamodule=dm, ckpt_path="spatio-temporal prediction/1obvx0gb/checkpoints/epoch=199-step=401399.ckpt")
+    trainer.fit(model, dm)
+    trainer.test(model, datamodule=dm)
 
     # # calculate metrics
     # preds = trainer.predict(model, datamodule=dm)
