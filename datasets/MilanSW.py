@@ -8,21 +8,16 @@ from pytorch_lightning import LightningDataModule
 class MilanSW(Milan, LightningDataModule):
     """ Milan Dataset in a sliding window fashion """
     def __init__(self, 
-                 data_dir: str = 'data/sms-call-internet-mi',
-                 aggr_time: str = None,
                  in_len: int = 12, 
-                 out_len: int = 1, 
-                 batch_size: int = 64, 
-                 tele_column: str = 'internet',
-                 normalize: bool = False,):
-        Milan.__init__(self, data_dir, aggr_time, out_len, batch_size, normalize, tele_column)
+                 **kwargs):
+        Milan.__init__(self, **kwargs)
         self.in_len = in_len
 
     def prepare_data(self):
-        return super().prepare_data()
+        super().prepare_data()
     
     def setup(self, stage=None):
-        return super().setup(stage)
+        super().setup(stage)
 
     def train_dataloader(self):
         milan_train = MilanSlidingWindowDataset(self.milan_train, input_len=self.in_len)
@@ -37,6 +32,9 @@ class MilanSW(Milan, LightningDataModule):
         return DataLoader(MilanSlidingWindowDataset(self.milan_test, input_len=self.in_len), 
                           batch_size=self.batch_size, shuffle=False, num_workers=4)
 
+    def predict_dataloader(self):
+        return DataLoader(MilanSlidingWindowDataset(self.milan_test, input_len=self.in_len), 
+                          batch_size=self.batch_size, shuffle=False, num_workers=4)
 
 class MilanSlidingWindowDataset(Dataset):
     def __init__(self,

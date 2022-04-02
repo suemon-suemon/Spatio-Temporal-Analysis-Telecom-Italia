@@ -11,6 +11,7 @@ import wandb
 import optuna
 import torch
 import pytorch_lightning as pl
+from torch.nn import MSELoss, L1Loss
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -24,19 +25,25 @@ MAX_EPOCHS = 200
 def create_LSTM_dm(trial):
     emb_size = trial.suggest_int("emb_size", 16, 128, log=True)
     hidden_size = trial.suggest_int("hidden_size", 16, 128, log=True)
-    seq_len = trial.suggest_int("seq_len", 12, 144, log=True)
+    seq_len = trial.suggest_int("seq_len", 3, 48)
     num_layers = trial.suggest_int("num_layers", 1, 4)
     dropout = trial.suggest_float("dropout", 0.0, 0.5)
     learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
     is_input_emb = trial.suggest_categorical("is_input_emb", [True, False])
+    loss_type = trial.suggest_categorical("loss_type", ["mse", "mae"])
     trial.set_user_attr("batch_size", 1024)
+    trial.set_user_attr("aggr_time", 'hour')
+    trial.set_user_attr("time_range", 'all')
     print(emb_size, hidden_size, seq_len, num_layers, dropout, learning_rate, is_input_emb)
-    dm = MilanSW(batch_size=trial.user_attrs['batch_size'], in_len=seq_len, out_len=1)
+    dm = MilanSW(batch_size=trial.user_attrs['batch_size'], 
+                 in_len=seq_len, 
+                 aggr_time=trial.user_attrs['aggr_time'], 
+                 time_range=trial.user_attrs['time_range'])
     model = LSTMRegressor(n_features=121, 
                          emb_size=emb_size, 
                          hidden_size=hidden_size, 
                          seq_len=seq_len, 
-                         criterion=torch.nn.MSELoss(), 
+                         criterion=L1Loss() if loss_type == "mae" else MSELoss(), 
                          num_layers=num_layers, 
                          dropout=dropout, 
                          learning_rate=learning_rate,
@@ -49,11 +56,12 @@ def objective(trial):
 
     logger = WandbLogger(project="spatio-temporal prediction")
     lr_monitor = LearningRateMonitor(logging_interval='step')
-    logger.experiment.config["exp_tag"] = "optuna_search"
+    logger.experiment.config["exp_tag"] = "LSTM_hr_search"
+    logger.experiment.config.update(trial.user_attrs, allow_val_change=True)
+    logger.experiment.config.update(trial.params, allow_val_change=True)
 
     trainer = pl.Trainer(
         logger=logger,
-        limit_val_batches=0.1,
         max_epochs=MAX_EPOCHS,
         gpus=1,
         callbacks=[lr_monitor, 
@@ -73,7 +81,7 @@ if __name__ == "__main__":
     
     study = optuna.create_study(
         direction="minimize",
-        study_name="milan-LSTM",
+        study_name="milan-LSTM_hr",
         pruner=optuna.pruners.MedianPruner(),
     )
     study.optimize(objective, n_trials=100)

@@ -8,25 +8,20 @@ from pytorch_lightning import LightningDataModule
 class MilanFG(Milan, LightningDataModule):
     """ Milan Dataset in a full-grid fashion """
     def __init__(self, 
-                 aggr_time: str,
-                 data_dir: str = 'data/sms-call-internet-mi',
                  close_len: int = 12, 
                  period_len: int = 0,
                  trend_len: int = 0,
-                 out_len: int = 1, 
-                 batch_size: int = 64, 
-                 tele_column: str = 'internet',
-                 normalize: bool = False,):
-        Milan.__init__(self, data_dir, aggr_time, out_len, batch_size, normalize, tele_column)
+                 **kwargs):
+        Milan.__init__(self, **kwargs)
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
 
     def prepare_data(self):
-        return super().prepare_data()
+        super().prepare_data()
     
     def setup(self, stage=None):
-        return super().setup(stage)
+        super().setup(stage)
 
     def train_dataloader(self):
         # TODO: fix parameters!
@@ -44,6 +39,11 @@ class MilanFG(Milan, LightningDataModule):
         milan_test_ds = MilanFullGridDataset(self.milan_test, self.aggr_time, self.close_len, 
                                              self.period_len, self.trend_len, self.out_len)
         return DataLoader(milan_test_ds, batch_size=self.batch_size, shuffle=False, num_workers=4)
+    
+    def predict_dataloader(self):
+        milan_pred_ds = MilanFullGridDataset(self.milan_test, self.aggr_time, self.close_len, 
+                                             self.period_len, self.trend_len, self.out_len)
+        return DataLoader(milan_pred_ds, batch_size=self.batch_size, shuffle=False, num_workers=4)
 
 
 class MilanFullGridDataset(Dataset):

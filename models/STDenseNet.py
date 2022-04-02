@@ -144,6 +144,10 @@ class STDenseNet(LightningModule):
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
         self.log('val_loss', loss, on_epoch=True)
+        
+        # reverse scale
+        y = self._inverse_transform(y)
+        y_hat = self._inverse_transform(y_hat)
         self.valid_MAE(y_hat, y)
         self.log('val_MAE', self.valid_MAE, on_epoch=True)
         self.valid_MAPE(y_hat, y)
@@ -158,6 +162,9 @@ class STDenseNet(LightningModule):
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
         self.log('test_loss', loss)
+        
+        y = self._inverse_transform(y)
+        y_hat = self._inverse_transform(y_hat)
         self.test_MAE(y_hat, y)
         self.log('test_MAE', self.test_MAE, on_epoch=True)
         self.test_MAPE(y_hat, y)
@@ -166,3 +173,15 @@ class STDenseNet(LightningModule):
         self.log('test_RMSE', self.test_RMSE, on_epoch=True)
         self.test_SMAPE(y_hat, y)
         self.log('test_SMAPE', self.test_SMAPE, on_epoch=True)
+
+    def predict_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        y_hat = self._inverse_transform(y_hat)
+        return y_hat
+
+    def _inverse_transform(self, y):
+        yn = y.detach().cpu().numpy() # detach from computation graph
+        scaler = self.trainer.datamodule.scaler
+        yn = scaler.inverse_transform(yn.reshape(-1, 1)).reshape(yn.shape)
+        return torch.from_numpy(yn).cuda()

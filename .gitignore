@@ -10,6 +10,7 @@ experiments/results/
 # pytorch-lightning & wandb
 wandb/
 spatio-temporal prediction/
+lightning_logs/
 
 # C extensions
 *.so

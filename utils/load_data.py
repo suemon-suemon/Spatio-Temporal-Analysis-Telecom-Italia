@@ -56,13 +56,16 @@ def load_part_grid_data(data_dir: str,
         milan_data.reset_index(inplace=True)
     # reshape dataframe to ndarray of size (n_timesteps, n_cells)
     milan_grid_data = df2cell_time_array(milan_data)
+    
+    scaler = None
     if normalize:
-        scaler = MinMaxScaler()
-        milan_grid_data = scaler.fit_transform(milan_grid_data)
+        scaler = MinMaxScaler((0, 10))
+        milan_grid_data = scaler.fit_transform(milan_grid_data.reshape(-1, 1)).reshape(milan_grid_data.shape)
+        # milan_grid_data = scaler.fit_transform(milan_grid_data)
     # Input and parameter tensors are not the same dtype, found input tensor with Double and parameter tensor with Float
     milan_grid_data = milan_grid_data.astype(np.float32)
     print("loaded {} rows and {} grids".format(milan_grid_data.shape[0], milan_grid_data.shape[1]))
-    return milan_grid_data, milan_data # ndarray shape of (n_timesteps, n_grids), original dataframe
+    return milan_grid_data, milan_data, scaler # ndarray shape of (n_timesteps, n_grids), original dataframe
 
 
 def load_and_save_telecom_data_by_tele(paths: list, save_path: str, tele_column: str = 'internet'):
