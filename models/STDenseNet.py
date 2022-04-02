@@ -1,12 +1,13 @@
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning import LightningModule
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torchmetrics import (MeanAbsoluteError, MeanAbsolutePercentageError,
-                          MeanSquaredError,
-                          SymmetricMeanAbsolutePercentageError)
-from collections import OrderedDict
+from torch.nn import L1Loss
+
+from models.STBase import STBase
+
 
 class _DenseLayer(nn.Sequential):
     def __init__(self, num_input_features, growth_rate, bn_size, drop_rate):
@@ -81,36 +82,25 @@ class DenseNetUnit(nn.Sequential):
         return out
 
 
-class STDenseNet(LightningModule):
+class STDenseNet(STBase, LightningModule):
     def __init__(self, 
-                 learning_rate,
                  channels: list=[3,3,0],
-                 criterion=nn.MSELoss()):
+                 **kwargs):
         """
         :param list channels: define channels of different Unit, a list of [close, peoriod, trend], defaults to [3,3,0]
         """
-        super(STDenseNet, self).__init__()
+        kwargs['reduceLRPatience'] = 10
+        super(STDenseNet, self).__init__(**kwargs)
         if len(channels) != 3:
             raise ValueError("The length of channels should be 3.")
         self.channels_close = channels[0]
         self.channels_period = channels[1]
         self.channels_trend = channels[2]
-        self.learning_rate = learning_rate
-        self.criterion = criterion
         self.save_hyperparameters()
 
         self.feature_close = DenseNetUnit(self.channels_close, 1)
         self.feature_period = DenseNetUnit(self.channels_period, 1)
         self.feature_trend = DenseNetUnit(self.channels_trend, 1)      
-
-        self.valid_MAE = MeanAbsoluteError()
-        self.valid_MAPE = MeanAbsolutePercentageError()
-        self.valid_SMAPE = SymmetricMeanAbsolutePercentageError()
-        self.valid_RMSE = MeanSquaredError(squared=False)
-        self.test_MAE = MeanAbsoluteError()
-        self.test_MAPE = MeanAbsolutePercentageError()
-        self.test_SMAPE = SymmetricMeanAbsolutePercentageError()
-        self.test_RMSE = MeanSquaredError(squared=False)
 
     def forward(self, x):
         xc = x[:, 0:self.channels_close, :, :]
@@ -122,66 +112,3 @@ class STDenseNet(LightningModule):
         if self.channels_trend > 0:
             out += self.feature_trend(xt)
         return torch.sigmoid(out)
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        scheduler = ReduceLROnPlateau(optimizer, 'min', patience=10, verbose=True)
-        return {
-           'optimizer': optimizer,
-           'lr_scheduler': scheduler,
-           'monitor': 'val_loss',
-        }
-
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        self.log('train_loss', loss)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        self.log('val_loss', loss, on_epoch=True)
-        
-        # reverse scale
-        y = self._inverse_transform(y)
-        y_hat = self._inverse_transform(y_hat)
-        self.valid_MAE(y_hat, y)
-        self.log('val_MAE', self.valid_MAE, on_epoch=True)
-        self.valid_MAPE(y_hat, y)
-        self.log('val_MAPE', self.valid_MAPE, on_epoch=True)
-        self.valid_RMSE(y_hat, y)
-        self.log('val_RMSE', self.valid_RMSE, on_epoch=True)
-        self.valid_SMAPE(y_hat, y)
-        self.log('val_SMAPE', self.valid_SMAPE, on_epoch=True)
-    
-    def test_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
-        loss = self.criterion(y_hat, y)
-        self.log('test_loss', loss)
-        
-        y = self._inverse_transform(y)
-        y_hat = self._inverse_transform(y_hat)
-        self.test_MAE(y_hat, y)
-        self.log('test_MAE', self.test_MAE, on_epoch=True)
-        self.test_MAPE(y_hat, y)
-        self.log('test_MAPE', self.test_MAPE, on_epoch=True)
-        self.test_RMSE(y_hat, y)
-        self.log('test_RMSE', self.test_RMSE, on_epoch=True)
-        self.test_SMAPE(y_hat, y)
-        self.log('test_SMAPE', self.test_SMAPE, on_epoch=True)
-
-    def predict_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
-        y_hat = self._inverse_transform(y_hat)
-        return y_hat
-
-    def _inverse_transform(self, y):
-        yn = y.detach().cpu().numpy() # detach from computation graph
-        scaler = self.trainer.datamodule.scaler
-        yn = scaler.inverse_transform(yn.reshape(-1, 1)).reshape(yn.shape)
-        return torch.from_numpy(yn).cuda()

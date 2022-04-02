@@ -12,7 +12,7 @@ class MilanFG(Milan, LightningDataModule):
                  period_len: int = 0,
                  trend_len: int = 0,
                  **kwargs):
-        Milan.__init__(self, **kwargs)
+        super().__init__(**kwargs)
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
