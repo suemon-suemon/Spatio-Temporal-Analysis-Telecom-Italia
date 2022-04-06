@@ -162,7 +162,6 @@ class ConvLSTM(nn.Module):
                  bidirectional=False):
         super(ConvLSTM, self).__init__()
 
-        print(kernel_size)
         self.batch_first = batch_first
         self.return_sequence = return_sequence
         self.bidirectional = bidirectional
@@ -205,6 +204,7 @@ class ConvLSTM(nn.Module):
         if not self.batch_first:
             # (t, b, c, h, w) -> (b, t, c, h, w)
             input_tensor = input_tensor.permute(1, 0, 2, 3, 4)
+        input_tensor = input_tensor.permute(0, 2, 1, 3, 4)
 
         b, seq_len, _, h, w = input_tensor.size()
 
@@ -231,7 +231,6 @@ class ConvLSTM(nn.Module):
         last_state = [h, c]
         ####################
         
-        
         ## LSTM inverse direction
         if self.bidirectional is True:
             input_inv = input_tensor
@@ -247,8 +246,10 @@ class ConvLSTM(nn.Module):
             layer_output = torch.cat((output_inner, output_inv), dim=2)
             last_state_inv = [h_inv, c_inv]
         ###################################
-        
-        return layer_output if self.return_sequence is True else layer_output[:, -1:], last_state, last_state_inv if self.bidirectional is True else None
+
+        output = layer_output if self.return_sequence is True else layer_output[:, -1:]
+        output = output.permute(0, 2, 1, 3, 4)
+        return output, last_state, last_state_inv if self.bidirectional is True else None
 
     def _init_hidden(self, batch_size):
         init_states_fw = self.cell_fw.init_hidden(batch_size)

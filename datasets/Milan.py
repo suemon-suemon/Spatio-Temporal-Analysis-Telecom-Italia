@@ -80,6 +80,9 @@ class Milan():
         self.test_split_date = self.get_default_split_date(time_range)['test']
 
         self.grid_range = grid_range # (min_row, max_row, min_col, max_col)
+        self.n_rows = grid_range[1] - grid_range[0] + 1
+        self.n_cols = grid_range[3] - grid_range[2] + 1
+        self.n_grids = self.n_rows * self.n_cols
 
         self.normalize = normalize
         self.max_norm = max_norm
@@ -137,16 +140,16 @@ class Milan():
         if stage == "fit" or stage is None:
             train_len, val_len = self._load_data()
             milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len)
-            self.milan_train = milan_train.reshape(-1, 30, 30)
-            self.milan_val = milan_val.reshape(-1, 30, 30)
-            self.milan_test = milan_test.reshape(-1, 30, 30)
+            self.milan_train = milan_train.reshape(-1, self.n_rows, self.n_cols)
+            self.milan_val = milan_val.reshape(-1, self.n_rows, self.n_cols)
+            self.milan_test = milan_test.reshape(-1, self.n_rows, self.n_cols)
             print('train shape: {}, val shape: {}, test shape: {}'.format(self.milan_train.shape, self.milan_val.shape, self.milan_test.shape))
         # Assign test dataset for use in dataloader(s)
         if stage in ["test", "predict"] or stage is None:
             if self.milan_test is None:
                 train_len, val_len = self._load_data()
                 milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len)
-                self.milan_test = milan_test.reshape(-1, 30, 30)
+                self.milan_test = milan_test.reshape(-1, self.n_rows, self.n_cols)
                 print('test shape: {}'.format(self.milan_test.shape))
 
     def _load_data(self):

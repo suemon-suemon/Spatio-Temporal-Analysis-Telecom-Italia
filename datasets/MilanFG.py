@@ -12,7 +12,7 @@ class MilanFG(Milan, LightningDataModule):
                  period_len: int = 0,
                  trend_len: int = 0,
                  **kwargs):
-        super().__init__(**kwargs)
+        super(MilanFG, self).__init__(**kwargs)
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
@@ -82,6 +82,7 @@ class MilanFullGridDataset(Dataset):
             X = np.concatenate([X, Xp], axis=0)
         if Xt is not None:
             X = np.concatenate([X, Xt], axis=0)
+        X = X.reshape((1, X.shape[0], X.shape[1], X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
         X = torch.tensor(X, dtype=torch.float32)
         Y = torch.tensor(Y, dtype=torch.float32)
         return X, Y

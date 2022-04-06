@@ -82,7 +82,7 @@ class DenseNetUnit(nn.Sequential):
         return out
 
 
-class STDenseNet(STBase, LightningModule):
+class STDenseNet(STBase):
     def __init__(self, 
                  channels: list=[3,3,0],
                  **kwargs):
@@ -96,6 +96,7 @@ class STDenseNet(STBase, LightningModule):
         self.channels_close = channels[0]
         self.channels_period = channels[1]
         self.channels_trend = channels[2]
+        self.seq_len = self.channels_close
         self.save_hyperparameters()
 
         self.feature_close = DenseNetUnit(self.channels_close, 1)
@@ -103,6 +104,7 @@ class STDenseNet(STBase, LightningModule):
         self.feature_trend = DenseNetUnit(self.channels_trend, 1)      
 
     def forward(self, x):
+        x = x.squeeze() 
         xc = x[:, 0:self.channels_close, :, :]
         xp = x[:, self.channels_close:self.channels_close+self.channels_period, :, :]
         xt = x[:, self.channels_close+self.channels_period:self.channels_close+self.channels_period+self.channels_trend, :, :]

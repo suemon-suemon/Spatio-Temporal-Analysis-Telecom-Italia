@@ -1,40 +1,40 @@
-from encodings import normalize_encoding
+from matplotlib import pyplot as plt
 from fix_path import fix_python_path_if_working_locally
 
 fix_python_path_if_working_locally()
 
 import os
-import torch
 
-import matplotlib.pyplot as plt
 from datasets import MilanFG
-from models import STDenseNet
+from models import Mvstgn
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
 from torch import nn
+import torch
 
 
 if __name__ == "__main__":
     os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-    os.environ["CUDA_VISIBLE_DEVICES"]="1"
+    os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
     seed_everything(42)
 
     p = dict(
         # dataset
-        aggr_time = None,
+        aggr_time = 'hour',
         time_range = 'all',
         normalize = True,
-        max_norm = 10,
-        batch_size = 64,
-        learning_rate = 1e-4,
+        max_norm = 1,
+        batch_size = 16,
+        learning_rate = 1e-3,
+        grid_range = (41, 60 ,41, 60),
 
         max_epochs = 500,
         criterion = nn.L1Loss(),
         close_len = 3,
-        period_len = 3,
+        period_len = 0,
         trend_len = 0,
     )
 
@@ -47,26 +47,28 @@ if __name__ == "__main__":
         max_norm=p['max_norm'],
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
-    )
-    model = STDenseNet(
-        learning_rate = p['learning_rate'],
-        channels = [p['close_len'], p['period_len'], p['trend_len']],
-        normalize = p['normalize'],
+        grid_range=p['grid_range'],
     )
 
+    model = Mvstgn(
+        input_shape=(p['batch_size'], p['close_len'], 1, dm.n_rows, dm.n_cols),
+        learning_rate=p['learning_rate'],
+    )
+    # model = Mvstgn.load_from_checkpoint("spatio-temporal prediction/3eyl8rqy/checkpoints/epoch=203-step=14075.ckpt")
+
+
     wandb_logger = WandbLogger(project="spatio-temporal prediction")
-    wandb_logger.experiment.config["exp_tag"] = "stDenseNet"
-    wandb_logger.experiment.config.update(p)
+    wandb_logger.experiment.config["exp_tag"] = "Mvstgn"
+    wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
     trainer = Trainer(
-        log_every_n_steps=1,
-        check_val_every_n_epoch=1,
         max_epochs=p['max_epochs'],
         logger=wandb_logger,
         gpus=1,
-        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20, verbose=True)]
-    )    
+        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
+    )
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
     trainer.predict(model, datamodule=dm)
+    

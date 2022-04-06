@@ -1,21 +1,21 @@
 from pytorch_lightning import LightningModule
-from torch import from_numpy
+from torch import from_numpy, cat
 from torch.nn import L1Loss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics import (MeanAbsoluteError, MeanAbsolutePercentageError,
                           MeanSquaredError,
                           SymmetricMeanAbsolutePercentageError)
-
+import matplotlib.pyplot as plt
+from wandb import wandb
+from utils.nrmse import nrmse
 
 class STBase(LightningModule):
     def __init__(self,
-                 normalize: bool = False,
                  learning_rate: float = 1e-5,
                  criterion = L1Loss(),
                  reduceLRPatience: int = 5,):
         super().__init__()
-        self.normalize = normalize
         self.learning_rate = learning_rate
         self.criterion = criterion
         self.reduceLRPatience = reduceLRPatience
@@ -29,12 +29,13 @@ class STBase(LightningModule):
         self.test_MAPE = MeanAbsolutePercentageError()
         self.test_SMAPE = SymmetricMeanAbsolutePercentageError()
         self.test_RMSE = MeanSquaredError(squared=False)
+        self.test_NRMSE = MeanSquaredError(squared=False)
 
     def forward(self, x):
         raise NotImplementedError
         
     def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.learning_rate)
+        optimizer = Adam(self.parameters(), lr=self.learning_rate, weight_decay=1e-4)
         scheduler = ReduceLROnPlateau(optimizer, 'min', patience=self.reduceLRPatience)
         return {
            'optimizer': optimizer,
@@ -55,7 +56,7 @@ class STBase(LightningModule):
         loss = self.criterion(y_hat, y)
         self.log('val_loss', loss, on_epoch=True)
 
-        if self.normalize:
+        if self.trainer.datamodule.normalize:
             y = self._inverse_transform(y)
             y_hat = self._inverse_transform(y_hat)
         
@@ -73,7 +74,7 @@ class STBase(LightningModule):
         y_hat = self(x)
         loss = self.criterion(y_hat, y)
 
-        if self.normalize:
+        if self.trainer.datamodule.normalize:
             y = self._inverse_transform(y)
             y_hat = self._inverse_transform(y_hat)
 
@@ -88,10 +89,27 @@ class STBase(LightningModule):
         self.log('test_SMAPE', self.test_SMAPE, on_epoch=True)
 
     def predict_step(self, batch, batch_idx):
-        x, y = batch
+        x, _ = batch
         y_hat = self(x)
-        y_hat = self._inverse_transform(y_hat) if self.normalize else y_hat
+        y_hat = self._inverse_transform(y_hat) if self.trainer.datamodule.normalize else y_hat
         return y_hat
+
+    def on_predict_epoch_end(self, results):
+        preds = cat(results[0]).reshape(-1, self.trainer.datamodule.n_grids)
+        gt = self.trainer.datamodule.milan_test[self.seq_len:].reshape(-1, self.trainer.datamodule.n_grids)
+        self.log('test_nrmse', nrmse(preds, gt))
+        if self.trainer.datamodule.normalize:
+            gt = self.trainer.datamodule.scaler.inverse_transform(gt.reshape(-1, 1)).reshape(gt.shape)
+        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(10, 10))
+        for i in range(3):
+            for j in range(3):
+                # compare preds with ground truth, draw plots
+                base = 300
+                axes[i, j].plot(gt[:, base+i*3+j], label="ground truth")
+                axes[i, j].plot(preds[:, base+i*3+j], label="prediction")
+                axes[i, j].legend()
+        self.logger.log_image('predictions', [wandb.Image(fig)])
+        plt.savefig("preds_mvstgn_{}.png".format(self.logger.version))
 
     def _inverse_transform(self, y):
         yn = y.detach().cpu().numpy() # detach from computation graph
