@@ -1,12 +1,12 @@
 import numpy as np
-import pytest
 
 from datasets import MilanSW
 from datasets.MilanSW import MilanSlidingWindowDataset
+from datasets.Milan import Milan
 
 
 # @pytest.mark.skip(reason="Take too much time")
-def test_milan_setup():
+def test_milanSW_setup():
     milan_dataset = MilanSW(data_dir="data/sms-call-internet-mi")
     milan_dataset.prepare_data()
     milan_dataset.setup()
@@ -45,5 +45,14 @@ def test_milan_dataset():
     assert(test_dataset[17][1] == 10)
 
 
-# if __name__ == '__main__':
-#     test_milan_setup()
+def test_milan_setup():
+    milan = Milan(tele_column='mobile', time_range='30days')
+    milan.prepare_data()
+    milan.setup()
+    data = milan.milan_grid_data
+    print(np.any(np.isnan(data)), np.all(np.isfinite(data)))
+    assert not np.any(np.isnan(data))
+    assert np.all(np.isfinite(data))
+
+if __name__ == '__main__':
+    test_milan_setup()

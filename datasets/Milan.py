@@ -1,54 +1,10 @@
 import os
-from abc import ABC, abstractmethod
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
-from utils.load_data import load_and_save_telecom_data_by_tele
-from utils.milano_grid import map_back
-
-
-def _gen_cellids_by_colrow(grid_range) -> list:
-    """
-    Generate cellid list by col and row
-    :param grid_range: the range of grids, (row_min, row_max, col_min, col_max)
-    """
-    row1, row2, col1, col2 = grid_range
-    cellids = []
-    for col in range(col1, col2 + 1):
-        for row in range(row1, row2 + 1):
-            cellids.append(map_back(row-1, col-1))
-    return cellids
-
-def _df2cell_time_array(data):
-    # reshape dataframe to ndarray of size (n_timesteps, n_cells)
-    data = data.reset_index()
-    data = data.pivot(index='time', columns='cellid', values='internet')
-    data = data.fillna(0)
-    data = data.values
-    # print("reshaped data to shape {}".format(data.shape))
-    return data
-
-def _get_grids_by_cellids(data: pd.DataFrame, cellids: list) -> pd.DataFrame:
-    """
-    Get the grids of the given cellids
-    :param data: the dataframe
-    :param cellids: the cellids
-    :return: the data of cell ids
-    """
-    return data.loc[data['cellid'].isin(cellids)]
-
-def _filter_grids_data_by_colrow(data: pd.DataFrame, grid_range) -> pd.DataFrame:
-    """
-    Get data of grids by the given col and row
-    :param data: the dataframe
-    :param grid_range: the range of grids, (row_min, row_max, col_min, col_max)
-    """
-    cellids = _gen_cellids_by_colrow(grid_range)
-    data = _get_grids_by_cellids(data, cellids)
-    data = data.sort_values(['cellid', 'time']).reset_index(drop=True)
-    return data
+from utils.milano_grid import gen_cellids_by_colrow
 
 class Milan():
     def __init__(self,
@@ -66,8 +22,8 @@ class Milan():
             raise ValueError("aggre_time must be None or 'hour'")
         self.aggr_time = aggr_time
 
-        if tele_column not in ['internet', 'smsin', 'smsout', 'callin', 'callout']:
-            raise ValueError('tele_column must be one of internet, smsin, smsout, callin, callout')
+        if tele_column not in ['internet', 'mobile']:
+            raise ValueError('tele_column must be one of internet, mobile')
         self.tele_column = tele_column
 
         self.time_range = time_range
@@ -75,7 +31,7 @@ class Milan():
             raise ValueError('time_range must be one of 30days, all')
         # milan_internet_all_data.csv.gz | milan_telecom_data.csv.gz
         self.data_dir = data_dir
-        self.file_name = "milan_internet_all_data.csv.gz" if time_range == 'all' else "milan_telecom_data.csv.gz"
+        self.file_name = "milan_{}_{}_data.csv.gz".format(tele_column, time_range)
         self.val_split_date = self.get_default_split_date(time_range)['val']
         self.test_split_date = self.get_default_split_date(time_range)['test']
 
@@ -115,21 +71,40 @@ class Milan():
             return {'val': {'year': 2013, 'month': 12, 'day': 18}, 
                     'test': {'year': 2013, 'month': 12, 'day': 22}}
 
+    @staticmethod
+    def _load_telecom_data(path):
+        print("loading data from file: {}".format(path))
+        data = pd.read_csv(path, header=0, index_col=0)
+        data = data.groupby(['cellid', 'time'], as_index=False).sum()
+        data.drop(['countrycode'], axis=1, inplace=True)
+        return data
+
     def prepare_data(self):
         if not os.path.exists(os.path.join(self.data_dir, self.file_name)):
-            raise FileNotFoundError("{} not found".format(self.file_name))
-            # start_date = self.dataset_start_date['day']
-            # end_date = self.dataset_end_date['day']
-            # if end_date > 10:
-            #     paths = ['sms-call-internet-mi-2013-11-0{i}.csv'.format(i=i) 
-            #              for i in range(start_date, 10)] + \
-            #             ['sms-call-internet-mi-2013-11-{i}.csv'.format(i=i) 
-            #              for i in range(10, end_date)]
-            # else:
-            #     paths = ['sms-call-internet-mi-2013-11-0{i}.csv'.format(i=i) 
-            #              for i in range(start_date, end_date)]
-            # paths = [os.path.join(self.data_dir, path) for path in paths]
-            # load_and_save_telecom_data_by_tele(paths, self.data_dir, tele_column=self.tele_column)
+            # raise FileNotFoundError("{} not found".format(self.file_name))
+            start_date = 1
+            end_date = 30
+            if end_date >= 10:
+                paths = ['sms-call-internet-mi-2013-11-0{i}.csv'.format(i=i) 
+                         for i in range(start_date, 10)] + \
+                        ['sms-call-internet-mi-2013-11-{i}.csv'.format(i=i) 
+                         for i in range(10, end_date+1)]
+            else:
+                paths = ['sms-call-internet-mi-2013-11-0{i}.csv'.format(i=i) 
+                         for i in range(start_date, end_date+1)]
+            paths = [os.path.join(self.data_dir, path) for path in paths]
+
+            data = pd.DataFrame()
+            for path in paths:
+                data = pd.concat([data, self._load_telecom_data(path)], ignore_index=True)
+            data = data.sort_values(['cellid', 'time']).reset_index(drop=True)
+            print("loaded {} rows".format(len(data)))
+            if self.tele_column == 'internet':
+                data = data[['cellid', 'time', self.tele_column]]
+            elif self.tele_column == 'mobile':
+                data['mobile'] = data['smsin'] + data['smsout'] + data['callin'] + data['callout'] + data['internet']
+            data.to_csv(os.path.join(
+                      self.data_dir, 'milan_{}_{}_data.csv.gz'.format(self.tele_column, self.time_range)), compression='gzip', index=False)
         else:
             print('{} already exists in {}'.format(self.file_name, self.data_dir))
 
@@ -160,16 +135,26 @@ class Milan():
         if not os.path.exists(filePath):
             raise FileNotFoundError("file {} not found".format(filePath))
 
-        milan_data = pd.read_csv(filePath, compression='gzip', usecols=['cellid', 'time', 'internet'])
+        milan_data = pd.read_csv(filePath, compression='gzip', usecols=['cellid', 'time', self.tele_column])
         milan_data['time'] = pd.to_datetime(milan_data['time'], format='%Y-%m-%d %H:%M:%S')
-        milan_data = _filter_grids_data_by_colrow(milan_data, self.grid_range)
+        cellids = gen_cellids_by_colrow(self.grid_range)
+        milan_data = milan_data.loc[milan_data['cellid'].isin(cellids)]
+        milan_data = milan_data.sort_values(['cellid', 'time']).reset_index(drop=True)
         if self.aggr_time == 'hour':
             milan_data = milan_data.groupby(['cellid', pd.Grouper(key="time", freq="1H")]).sum()
             milan_data.reset_index(inplace=True)
         self.milan_df = milan_data
 
         # reshape dataframe to ndarray of size (n_timesteps, n_cells)
-        milan_grid_data = _df2cell_time_array(milan_data)
+        print(milan_data.describe())
+        # print number of missing values or nan values
+        print('{} missing values'.format(milan_data.isnull().sum().sum()))
+        print('{} nan values'.format(np.isnan(milan_data).sum().sum()))
+        
+        milan_grid_data = milan_data.reset_index().pivot(index='time', columns='cellid', values=self.tele_column)
+        milan_grid_data = milan_grid_data.replace([np.inf, -np.inf], np.nan)
+        milan_grid_data = milan_grid_data.fillna(0).values
+
         if self.normalize:
             self.scaler = MinMaxScaler((0, self.max_norm))
             milan_grid_data = self.scaler.fit_transform(milan_grid_data.reshape(-1, 1)).reshape(milan_grid_data.shape)

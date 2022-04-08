@@ -1,14 +1,19 @@
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
 from pytorch_lightning import LightningModule
-from torch import from_numpy, cat
+from torch import cat, from_numpy
 from torch.nn import L1Loss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics import (MeanAbsoluteError, MeanAbsolutePercentageError,
                           MeanSquaredError,
                           SymmetricMeanAbsolutePercentageError)
-import matplotlib.pyplot as plt
-from wandb import wandb
 from utils.nrmse import nrmse
+from wandb import wandb
+from sklearn.metrics import mean_absolute_error
+
 
 class STBase(LightningModule):
     def __init__(self,
@@ -30,6 +35,8 @@ class STBase(LightningModule):
         self.test_SMAPE = SymmetricMeanAbsolutePercentageError()
         self.test_RMSE = MeanSquaredError(squared=False)
         self.test_NRMSE = MeanSquaredError(squared=False)
+
+        self.result_dir = "experiments/results"
 
     def forward(self, x):
         raise NotImplementedError
@@ -95,21 +102,36 @@ class STBase(LightningModule):
         return y_hat
 
     def on_predict_epoch_end(self, results):
-        preds = cat(results[0]).reshape(-1, self.trainer.datamodule.n_grids)
+        save_dir = os.path.join(self.result_dir, str(self.logger.version))
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        preds = cat(results[0]).reshape(-1, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+        np.savez_compressed(os.path.join(save_dir, "preds.npz"), preds)
+
         gt = self.trainer.datamodule.milan_test[self.seq_len:].reshape(-1, self.trainer.datamodule.n_grids)
-        self.log('test_nrmse', nrmse(preds, gt))
+        self.logger.log_metrics({'test_nrmse': nrmse(preds, gt)})
         if self.trainer.datamodule.normalize:
             gt = self.trainer.datamodule.scaler.inverse_transform(gt.reshape(-1, 1)).reshape(gt.shape)
-        fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(10, 10))
-        for i in range(3):
-            for j in range(3):
-                # compare preds with ground truth, draw plots
-                base = 300
-                axes[i, j].plot(gt[:, base+i*3+j], label="ground truth")
-                axes[i, j].plot(preds[:, base+i*3+j], label="prediction")
-                axes[i, j].legend()
-        self.logger.log_image('predictions', [wandb.Image(fig)])
-        plt.savefig("preds_mvstgn_{}.png".format(self.logger.version))
+        
+        fig1, axes = plt.subplots(nrows=3, ncols=3, figsize=(10, 10))
+        top9ind = np.argpartition(np.mean(gt, axis=0), -9)[-9:]
+        for i in range(9):
+            axes[i // 3, i % 3].plot(gt[:, top9ind[i]], label="gt")
+            axes[i // 3, i % 3].plot(preds[:, top9ind[i]], label="pred")
+            axes[i // 3, i % 3].set_title(f"{top9ind[i]}: MAE: {mean_absolute_error(preds[:, top9ind[i]], gt[:, top9ind[i]]):9.4f}")
+            axes[i // 3, i % 3].legend()
+        plt.savefig(os.path.join(save_dir, "preds_top9.png"))
+        fig2, axes = plt.subplots(nrows=3, ncols=3, figsize=(10, 10))
+        low9ind = np.argpartition(np.mean(gt, axis=0), 9)[:9]
+        for i in range(9):
+            axes[i // 3, i % 3].plot(gt[:, low9ind[i]], label="gt")
+            axes[i // 3, i % 3].plot(preds[:, low9ind[i]], label="pred")
+            axes[i // 3, i % 3].set_title(f"{low9ind[i]}: MAE: {mean_absolute_error(preds[:, low9ind[i]], gt[:, low9ind[i]]):9.4f}")
+            axes[i // 3, i % 3].legend()
+        plt.savefig(os.path.join(save_dir, "preds_low9.png"))
+        self.logger.log_image('pred_top9', [wandb.Image(fig1)])
+        self.logger.log_image('pred_low9', [wandb.Image(fig2)])
 
     def _inverse_transform(self, y):
         yn = y.detach().cpu().numpy() # detach from computation graph

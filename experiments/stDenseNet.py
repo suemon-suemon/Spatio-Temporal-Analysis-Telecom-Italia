@@ -18,23 +18,23 @@ from torch import nn
 
 if __name__ == "__main__":
     os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-    os.environ["CUDA_VISIBLE_DEVICES"]="1"
+    os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
     seed_everything(42)
 
     p = dict(
         # dataset
         aggr_time = None,
-        time_range = 'all',
+        time_range = '30days',
         normalize = True,
-        max_norm = 10,
+        max_norm = 1,
         batch_size = 64,
-        learning_rate = 1e-4,
+        learning_rate = 1e-3,
 
         max_epochs = 500,
         criterion = nn.L1Loss(),
-        close_len = 3,
-        period_len = 3,
+        close_len = 6,
+        period_len = 0,
         trend_len = 0,
     )
 
@@ -51,7 +51,6 @@ if __name__ == "__main__":
     model = STDenseNet(
         learning_rate = p['learning_rate'],
         channels = [p['close_len'], p['period_len'], p['trend_len']],
-        normalize = p['normalize'],
     )
 
     wandb_logger = WandbLogger(project="spatio-temporal prediction")
@@ -64,7 +63,7 @@ if __name__ == "__main__":
         max_epochs=p['max_epochs'],
         logger=wandb_logger,
         gpus=1,
-        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20, verbose=True)]
+        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=50, verbose=True)]
     )    
 
     trainer.fit(model, dm)

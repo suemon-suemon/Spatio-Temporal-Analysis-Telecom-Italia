@@ -74,7 +74,7 @@ def load_and_save_telecom_data_by_tele(paths: list, save_path: str, tele_column:
     Args:
         paths (list): list of paths to the files
     """
-    raise(NotImplementedError)
+    # raise(NotImplementedError)
     data = load_multi_telecom_data(paths)
     data = data[['cellid', 'time', tele_column]]
     data.to_csv(os.path.join(

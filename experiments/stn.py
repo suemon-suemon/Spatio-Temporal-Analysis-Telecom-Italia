@@ -22,14 +22,14 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = 'all',
+        time_range = '30days',
         aggr_time = None,
-        batch_size = 512,
+        batch_size = 1024,
         learning_rate = 1e-3,
         normalize = False,
         
         # model trainer
-        max_epochs = 200,
+        max_epochs = 500,
         criterion = nn.L1Loss(),
         x_dim = 11, 
         y_dim = 11,
@@ -42,6 +42,7 @@ if __name__ == "__main__":
         seq_len = p['seq_len'],
         learning_rate = p['learning_rate'],
     )
+    model = STN.load_from_checkpoint("spatio-temporal prediction/3k17i64o/checkpoints/epoch=75-step=153139.ckpt")
 
     dm = MilanSW(
         batch_size=p['batch_size'], 
@@ -52,7 +53,7 @@ if __name__ == "__main__":
         flatten=False,
     )
 
-    wandb_logger = WandbLogger(project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(project="spatio-temporal prediction", id='3k17i64o', resume=True)
     wandb_logger.experiment.config["exp_tag"] = "STN"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -60,9 +61,9 @@ if __name__ == "__main__":
         max_epochs=p['max_epochs'],
         logger=wandb_logger,
         gpus=1,
-        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
+        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=10)]
     )
 
-    trainer.fit(model, dm)
+    # trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
     trainer.predict(model, datamodule=dm)

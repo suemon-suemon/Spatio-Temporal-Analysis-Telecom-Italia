@@ -23,17 +23,18 @@ def create_STDenseNet_dm(trial):
     close_len = trial.suggest_int("close_len", 3, 12)
     period_len = trial.suggest_int("period_len", 0, 9)
     trend_len = trial.suggest_int("trend_len", 0, 9)
-    max_norm = trial.suggest_float("max_norm", 1, 50)
+    max_norm = trial.suggest_float("max_norm", 1, 10)
     learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True)
     trial.set_user_attr("batch_size", 64)
     trial.set_user_attr("normalize", True)
-    trial.set_user_attr("aggr_time", "hour")
+    trial.set_user_attr("aggr_time", None)
     dm = MilanFG(batch_size=trial.user_attrs['batch_size'], 
                  close_len=close_len,
                  period_len=period_len,
                  trend_len=trend_len,
                  normalize=trial.user_attrs['normalize'],
                  max_norm=max_norm,
+                 time_range='30days',
                  aggr_time=trial.user_attrs['aggr_time'])
     model = STDenseNet(learning_rate=learning_rate,
                        channels=[close_len, period_len, trend_len])
@@ -44,7 +45,7 @@ def objective(trial):
 
     logger = WandbLogger(project="spatio-temporal prediction")
     lr_monitor = LearningRateMonitor(logging_interval='step')
-    logger.experiment.config["exp_tag"] = "STDenseNet_hr_search"
+    logger.experiment.config["exp_tag"] = "STDenseNet_30days_search"
     logger.experiment.config.update(trial.params, allow_val_change=True)
     # print("params of trail: ", trial.params)
 
@@ -75,7 +76,7 @@ if __name__ == "__main__":
         study_name="milan-STDenseNet_hr",
         pruner=optuna.pruners.MedianPruner(),
     )
-    study.optimize(objective, n_trials=100)
+    study.optimize(objective, n_trials=50)
 
     print("Number of finished trials: {}".format(len(study.trials)))
 
