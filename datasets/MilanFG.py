@@ -191,12 +191,13 @@ class MilanFGStTranDataset(Dataset):
 
         Y = self.milan_data[out_start_idx: out_start_idx+self.out_len].squeeze()
         Xc = self.milan_data[out_start_idx-self.close_len: out_start_idx] # Xc
-        indices = _get_indexes_of_train(self.time_level, out_start_idx, self.close_len, self.period_len)
+        indices = _get_indexes_of_train('sttran', self.time_level, out_start_idx, self.close_len, self.period_len)
         Xp = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         Xp = np.stack(Xp, axis=0)
 
-        Xc = Xc.reshape((Xc.shape[0], Xc.shape[1] * Xc.shape[2])).transpose(0, 1)
-        Xp = Xp.reshape((self.period, self.close_len, Xp.shape[1] * Xp.shape[2])).transpose(2, 0, 1)
+        Xc = Xc.reshape((Xc.shape[0], Xc.shape[1] * Xc.shape[2])).transpose(1, 0)
+        Xp = Xp.reshape((self.period_len, self.close_len, Xp.shape[1] * Xp.shape[2])).transpose(2, 1, 0)
+        Y = Y.reshape((Y.shape[0], Y.shape[1] * Y.shape[2])).transpose(1, 0)
         return Xc, Xp, Y # (N, c), (N, p, c), (N, c)
 
 

@@ -1,5 +1,5 @@
 import pandas as pd
-from datasets.MilanFG import MilanFullGridDataset, MilanFGInformerDataset
+from datasets.MilanFG import MilanFullGridDataset, MilanFGInformerDataset, MilanFGStTranDataset
 import numpy as np
 
 
@@ -77,6 +77,19 @@ def test_milan_FGInformer_dataset():
     label = np.array(range(157, 170))
     np.testing.assert_array_equal(test_ds[test_idx][1], np.repeat(label[:, np.newaxis], 9, axis=1))
 
+def test_milan_StTran_dataset():
+    len_ts = 168 * 4 # 4 weeks, 168 = 24 * 7
+    close_len = period_len = out_len = 3
+    fg_test_data = np.array([[i+1] * 9 for i in range(len_ts)]).reshape((len_ts, 3, 3))
+    test_ds = MilanFGStTranDataset(fg_test_data, aggr_time='hour', close_len=close_len, period_len=period_len, out_len=out_len)
+    assert len(test_ds) == len_ts - close_len - out_len + 1
+    test_idx = 168 - 3
+    assert test_ds[test_idx][0].shape == (9, 3) # Xc
+    assert test_ds[test_idx][1].shape == (9, 3, 3) # Xp
+    assert test_ds[test_idx][2].shape == (9, 3) # Y
+    pc = np.array([[95, 96, 97], [119, 120, 121], [143, 144, 145]])
+    np.testing.assert_array_almost_equal(test_ds[test_idx][1], pc[np.newaxis,:,:].repeat(9, axis=0))
+    
 
 if __name__ == '__main__':
-    test_milan_FGInformer_dataset()
+    test_milan_StTran_dataset()
