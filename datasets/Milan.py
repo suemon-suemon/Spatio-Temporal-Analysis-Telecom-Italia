@@ -4,9 +4,10 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
+from pytorch_lightning import LightningDataModule
 from utils.milano_grid import gen_cellids_by_colrow
 
-class Milan():
+class Milan(LightningDataModule):
     def __init__(self,
                  data_dir: str = 'data/sms-call-internet-mi',
                  grid_range: tuple = (41, 70, 41, 70),
@@ -18,6 +19,7 @@ class Milan():
                  tele_column: str = 'internet',
                  time_range: str = 'all',
                  ):
+        super().__init__()
         if aggr_time not in [None, 'hour']:
             raise ValueError("aggre_time must be None or 'hour'")
         self.aggr_time = aggr_time
@@ -65,7 +67,7 @@ class Milan():
     def get_default_split_date(time_range) -> dict:
         # return val and test split date
         if time_range == '30days':
-            return {'val': {'year': 2013, 'month': 11, 'day': 17}, 
+            return {'val': {'year': 2013, 'month': 11, 'day': 18}, 
                     'test': {'year': 2013, 'month': 11, 'day': 21}}
         else:
             return {'val': {'year': 2013, 'month': 12, 'day': 18}, 
@@ -81,7 +83,7 @@ class Milan():
 
     def prepare_data(self):
         if not os.path.exists(os.path.join(self.data_dir, self.file_name)):
-            # raise FileNotFoundError("{} not found".format(self.file_name))
+            raise FileNotFoundError("{} not found".format(self.file_name))
             start_date = 1
             end_date = 30
             if end_date >= 10:
@@ -114,6 +116,11 @@ class Milan():
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
             train_len, val_len = self._load_data()
+            self.milan_timestamps = {
+                "train": self.milan_df['time'].iloc[:train_len],
+                "val": self.milan_df['time'].iloc[train_len:train_len+val_len],
+                "test": self.milan_df['time'].iloc[train_len+val_len:],
+            }
             milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len)
             self.milan_train = milan_train.reshape(-1, self.n_rows, self.n_cols)
             self.milan_val = milan_val.reshape(-1, self.n_rows, self.n_cols)
@@ -123,6 +130,11 @@ class Milan():
         if stage in ["test", "predict"] or stage is None:
             if self.milan_test is None:
                 train_len, val_len = self._load_data()
+                self.milan_timestamps = {
+                    "train": self.milan_df['time'].iloc[:train_len],
+                    "val": self.milan_df['time'].iloc[train_len:train_len+val_len],
+                    "test": self.milan_df['time'].iloc[train_len+val_len:],
+                }
                 milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len)
                 self.milan_test = milan_test.reshape(-1, self.n_rows, self.n_cols)
                 print('test shape: {}'.format(self.milan_test.shape))
@@ -146,11 +158,6 @@ class Milan():
         self.milan_df = milan_data
 
         # reshape dataframe to ndarray of size (n_timesteps, n_cells)
-        print(milan_data.describe())
-        # print number of missing values or nan values
-        print('{} missing values'.format(milan_data.isnull().sum().sum()))
-        print('{} nan values'.format(np.isnan(milan_data).sum().sum()))
-        
         milan_grid_data = milan_data.reset_index().pivot(index='time', columns='cellid', values=self.tele_column)
         milan_grid_data = milan_grid_data.replace([np.inf, -np.inf], np.nan)
         milan_grid_data = milan_grid_data.fillna(0).values
@@ -168,3 +175,15 @@ class Milan():
         val_len = self.milan_df['time'][(self.milan_df['time'] >= pd.Timestamp(
             **self.val_split_date)) & (self.milan_df['time'] < pd.Timestamp(**self.test_split_date))].unique().shape[0]
         return train_len, val_len
+
+    def train_dataloader(self):
+        raise NotImplementedError
+
+    def val_dataloader(self):
+        raise NotImplementedError
+
+    def test_dataloader(self):
+        raise NotImplementedError
+
+    def predict_dataloader(self):
+        raise NotImplementedError

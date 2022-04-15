@@ -1,49 +1,52 @@
-from datasets.Milan import Milan
-from torch.utils.data import DataLoader, Dataset
 import numpy as np
 import torch
-from pytorch_lightning import LightningDataModule
+from torch.utils.data import DataLoader, Dataset
+
+from datasets.Milan import Milan
+from utils.time_features import time_features
 
 
-class MilanFG(Milan, LightningDataModule):
+class MilanFG(Milan):
     """ Milan Dataset in a full-grid fashion """
     def __init__(self, 
+                 format: str = 'normal',
                  close_len: int = 12, 
                  period_len: int = 0,
                  trend_len: int = 0,
+                 label_len: int = 12,
                  **kwargs):
         super(MilanFG, self).__init__(**kwargs)
+        self.format = format
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
+        self.label_len = label_len
 
     def prepare_data(self):
-        super().prepare_data()
+        super().prepare_data(self)
     
     def setup(self, stage=None):
-        super().setup(stage)
+        super().setup(self, stage)
 
     def train_dataloader(self):
-        # TODO: fix parameters!
-        milan_train_ds = MilanFullGridDataset(self.milan_train, self.aggr_time, self.close_len, 
-                                                   self.period_len, self.trend_len, self.out_len)
-        print("Length of milan training dataset: ", len(milan_train_ds))
-        return DataLoader(milan_train_ds, batch_size=self.batch_size, shuffle=False, num_workers=4)
+        return DataLoader(self._get_dataset(self.milan_train, 'train'), batch_size=self.batch_size, shuffle=False, num_workers=8)
 
     def val_dataloader(self):
-        milan_val_ds = MilanFullGridDataset(self.milan_val, self.aggr_time, self.close_len, 
-                                            self.period_len, self.trend_len, self.out_len)
-        return DataLoader(milan_val_ds, batch_size=self.batch_size, shuffle=False, num_workers=4)
+        return DataLoader(self._get_dataset(self.milan_val, 'val'), batch_size=self.batch_size, shuffle=False, num_workers=8)
 
     def test_dataloader(self):
-        milan_test_ds = MilanFullGridDataset(self.milan_test, self.aggr_time, self.close_len, 
-                                             self.period_len, self.trend_len, self.out_len)
-        return DataLoader(milan_test_ds, batch_size=self.batch_size, shuffle=False, num_workers=4)
+        return DataLoader(self._get_dataset(self.milan_test, 'test'), batch_size=self.batch_size, shuffle=False, num_workers=8)
     
     def predict_dataloader(self):
-        milan_pred_ds = MilanFullGridDataset(self.milan_test, self.aggr_time, self.close_len, 
-                                             self.period_len, self.trend_len, self.out_len)
-        return DataLoader(milan_pred_ds, batch_size=self.batch_size, shuffle=False, num_workers=4)
+        return self.test_dataloader()
+
+    def _get_dataset(self, data, stage):
+        if self.format == 'normal':
+            return MilanFullGridDataset(data, self.aggr_time, self.close_len, 
+                                            self.period_len, self.trend_len, self.out_len)
+        elif self.format =='informer':
+            return MilanFGInformerDataset(data, self.milan_timestamps[stage], self.aggr_time, self.close_len, 
+                                            self.period_len, self.trend_len, self.label_len, self.out_len)
 
 
 class MilanFullGridDataset(Dataset):
@@ -114,3 +117,103 @@ class MilanFullGridDataset(Dataset):
             return np.zeros(data[0].shape)
         else:
             return data[ahead_idx]
+
+
+class MilanFGInformerDataset(Dataset):
+    def __init__(self,
+                 milan_data,
+                 timestamps,
+                 aggr_time: str,
+                 close_len: int = 12,
+                 period_len: int = 0,
+                 trend_len: int = 0,
+                 label_len: int = 12,
+                 out_len: int = 1):
+        # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
+        if aggr_time not in [None, 'hour']:
+            raise ValueError("aggre_time must be None or 'hour'")
+        self.time_level = aggr_time
+        self.milan_data = milan_data
+        self.timestamps = time_features(timestamps, timeenc=1, 
+                                        freq='h' if self.time_level == 'hour' else 't')
+        self.close_len = close_len
+        self.period_len = period_len
+        self.trend_len = trend_len
+        self.in_len = close_len
+        self.label_len = label_len
+        self.out_len = out_len
+
+    def __len__(self):
+        return len(self.milan_data)+1 - self.in_len - self.out_len
+    
+    def __getitem__(self, idx):
+        out_start_idx = idx + self.in_len
+        slice_shape = self.milan_data.shape[1:]
+        indices = _get_indexes_of_train('informer', self.time_level, out_start_idx, 
+                                        self.close_len, self.period_len, self.trend_len)
+        X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        X = np.stack(X, axis=0)
+        X = X.reshape((X.shape[0], X.shape[1] * X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
+
+        Y = self.milan_data[out_start_idx-self.label_len: out_start_idx+self.out_len].squeeze()
+        Y = Y.reshape((Y.shape[0], Y.shape[1] * Y.shape[2]))
+
+        X_timefeature = [self.timestamps[i] if i >= 0 else np.zeros((self.timestamps.shape[1])) for i in indices]
+        X_timefeature = np.stack(X_timefeature, axis=0)
+        Y_timefeature = self.timestamps[out_start_idx-self.label_len: out_start_idx+self.out_len]
+
+        return X, Y, X_timefeature, Y_timefeature
+    
+
+class MilanFGStTranDataset(Dataset):
+    def __init__(self,
+                 milan_data,
+                 aggr_time: str,
+                 close_len: int = 3,
+                 period_len: int = 3,
+                 out_len: int = 3):
+        # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
+        if aggr_time not in [None, 'hour']:
+            raise ValueError("aggre_time must be None or 'hour'")
+        self.time_level = aggr_time
+        self.milan_data = milan_data
+        self.close_len = close_len
+        self.period_len = period_len
+        self.in_len = close_len
+        self.out_len = out_len
+
+    def __len__(self):
+        return len(self.milan_data)+1 - self.in_len - self.out_len
+    
+    def __getitem__(self, idx):
+        out_start_idx = idx + self.in_len
+        slice_shape = self.milan_data.shape[1:]
+
+        Y = self.milan_data[out_start_idx: out_start_idx+self.out_len].squeeze()
+        Xc = self.milan_data[out_start_idx-self.close_len: out_start_idx] # Xc
+        indices = _get_indexes_of_train(self.time_level, out_start_idx, self.close_len, self.period_len)
+        Xp = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        Xp = np.stack(Xp, axis=0)
+
+        Xc = Xc.reshape((Xc.shape[0], Xc.shape[1] * Xc.shape[2])).transpose(0, 1)
+        Xp = Xp.reshape((self.period, self.close_len, Xp.shape[1] * Xp.shape[2])).transpose(2, 0, 1)
+        return Xc, Xp, Y # (N, c), (N, p, c), (N, c)
+
+
+def _get_indexes_of_train(format, time_level, out_start_idx, close_len, period_len, trend_len = 0):
+    if time_level == 'hour':
+        TIME_STEPS_OF_DAY = 24
+    else: # 10 mins level
+        TIME_STEPS_OF_DAY = 24 * 6
+    indices = []
+    if format == 'informer':
+        indices += [out_start_idx-i-1 for i in range(close_len)]
+        if period_len > 0:
+            indices += [out_start_idx-(i+1)*TIME_STEPS_OF_DAY-1 for i in range(period_len)]
+        if trend_len > 0:
+            indices += [out_start_idx-(i+1)*TIME_STEPS_OF_DAY*7 for i in range(trend_len)]
+    elif format == 'sttran':
+        if period_len > 0:
+            indices += [out_start_idx-(i+1)*TIME_STEPS_OF_DAY-j for j in range(close_len) for i in range(period_len)]
+    indices.reverse()
+    return indices

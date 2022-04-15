@@ -18,11 +18,11 @@ from sklearn.metrics import mean_absolute_error
 class STBase(LightningModule):
     def __init__(self,
                  learning_rate: float = 1e-5,
-                 criterion = L1Loss(),
+                 criterion = L1Loss,
                  reduceLRPatience: int = 5,):
         super().__init__()
         self.learning_rate = learning_rate
-        self.criterion = criterion
+        self.criterion = criterion()
         self.reduceLRPatience = reduceLRPatience
         self.save_hyperparameters()
 
@@ -50,16 +50,19 @@ class STBase(LightningModule):
            'monitor': 'val_loss'
         }
 
-    def training_step(self, batch, batch_idx):
+    def _process_one_batch(self, batch):
         x, y = batch
         y_hat = self(x)
+        return y_hat, y
+
+    def training_step(self, batch, batch_idx):
+        y_hat, y = self._process_one_batch(batch)
         loss = self.criterion(y_hat, y)
         self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
+        y_hat, y = self._process_one_batch(batch)
         loss = self.criterion(y_hat, y)
         self.log('val_loss', loss, on_epoch=True)
 
@@ -77,8 +80,7 @@ class STBase(LightningModule):
         self.log('val_SMAPE', self.valid_SMAPE, on_epoch=True)
     
     def test_step(self, batch, batch_idx):
-        x, y = batch
-        y_hat = self(x)
+        y_hat, y = self._process_one_batch(batch)
         loss = self.criterion(y_hat, y)
 
         if self.trainer.datamodule.normalize:
@@ -96,8 +98,7 @@ class STBase(LightningModule):
         self.log('test_SMAPE', self.test_SMAPE, on_epoch=True)
 
     def predict_step(self, batch, batch_idx):
-        x, _ = batch
-        y_hat = self(x)
+        y_hat, y = self._process_one_batch(batch)
         y_hat = self._inverse_transform(y_hat) if self.trainer.datamodule.normalize else y_hat
         return y_hat
 
