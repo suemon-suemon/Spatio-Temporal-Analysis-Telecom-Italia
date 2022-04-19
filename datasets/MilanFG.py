@@ -23,10 +23,10 @@ class MilanFG(Milan):
         self.label_len = label_len
 
     def prepare_data(self):
-        super().prepare_data(self)
+        Milan.prepare_data(self)
     
     def setup(self, stage=None):
-        super().setup(self, stage)
+        Milan.setup(self, stage)
 
     def train_dataloader(self):
         return DataLoader(self._get_dataset(self.milan_train, 'train'), batch_size=self.batch_size, shuffle=False, num_workers=8)
@@ -44,9 +44,11 @@ class MilanFG(Milan):
         if self.format == 'normal':
             return MilanFullGridDataset(data, self.aggr_time, self.close_len, 
                                             self.period_len, self.trend_len, self.out_len)
-        elif self.format =='informer':
+        elif self.format == 'informer':
             return MilanFGInformerDataset(data, self.milan_timestamps[stage], self.aggr_time, self.close_len, 
                                             self.period_len, self.trend_len, self.label_len, self.out_len)
+        elif self.format == 'sttran':
+            return MilanFGStTranDataset(data, self.aggr_time, self.close_len, self.period_len, self.out_len)
 
 
 class MilanFullGridDataset(Dataset):
@@ -189,11 +191,11 @@ class MilanFGStTranDataset(Dataset):
         out_start_idx = idx + self.in_len
         slice_shape = self.milan_data.shape[1:]
 
-        Y = self.milan_data[out_start_idx: out_start_idx+self.out_len].squeeze()
         Xc = self.milan_data[out_start_idx-self.close_len: out_start_idx] # Xc
         indices = _get_indexes_of_train('sttran', self.time_level, out_start_idx, self.close_len, self.period_len)
         Xp = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
-        Xp = np.stack(Xp, axis=0)
+        Xp = np.stack(Xp, axis=0).astype(np.float32)
+        Y = self.milan_data[out_start_idx: out_start_idx+self.out_len]
 
         Xc = Xc.reshape((Xc.shape[0], Xc.shape[1] * Xc.shape[2])).transpose(1, 0)
         Xp = Xp.reshape((self.period_len, self.close_len, Xp.shape[1] * Xp.shape[2])).transpose(2, 1, 0)
