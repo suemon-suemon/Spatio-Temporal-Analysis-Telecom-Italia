@@ -27,8 +27,8 @@ class STTran(STBase):
                  close_len = 3,
                  period_len = 3, 
                  out_len = 3,
-                 k_grids = 9,
-                 q_grids = 9,
+                 k_grids = 20,
+                 q_grids = 20,
                  n_grids = 900,
                  sp_dmodel = 64,
                  cl_dmodel = 256,
@@ -68,7 +68,7 @@ class STTran(STBase):
         (B, N, P, C) = xp.shape
         K, O = self.k_grids, self.out_len
         grid_map = self._grid_selection(xc, self.k_grids)
-        xc_expand = xc.unsqueeze(2).expand(B, N, N, C)
+        xc_expand = xc.unsqueeze(1).expand(B, N, N, C)
         topk_grids = xc_expand.gather(2, grid_map.unsqueeze(3).expand((*grid_map.shape, C)))
         
         # Spatial Encoding
