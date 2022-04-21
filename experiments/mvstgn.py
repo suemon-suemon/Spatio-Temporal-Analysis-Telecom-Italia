@@ -1,9 +1,6 @@
-from matplotlib import pyplot as plt
 from fix_path import fix_python_path_if_working_locally
 
 fix_python_path_if_working_locally()
-
-import os
 
 from datasets import MilanFG
 from models import Mvstgn
@@ -12,13 +9,8 @@ from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
 from torch import nn
-import torch
-
 
 if __name__ == "__main__":
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-    os.environ["CUDA_VISIBLE_DEVICES"]="2"
-
     seed_everything(42)
 
     p = dict(

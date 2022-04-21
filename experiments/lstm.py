@@ -30,7 +30,7 @@ if __name__ == "__main__":
         
         # model trainer
         max_epochs = 500,
-        criterion = nn.L1Loss(),
+        criterion = nn.L1Loss,
         n_features = 121,        
         seq_len = 12,
         emb_size = 16,

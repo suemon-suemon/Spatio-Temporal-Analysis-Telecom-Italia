@@ -1,9 +1,6 @@
-from matplotlib import pyplot as plt
 from fix_path import fix_python_path_if_working_locally
 
 fix_python_path_if_working_locally()
-
-import os
 
 from datasets import MilanSW, MilanFG
 from models import Informer
@@ -15,16 +12,13 @@ from torch import nn
 
 if __name__ == "__main__":
     IS_SW = True
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-    os.environ["CUDA_VISIBLE_DEVICES"]="0"
-
     seed_everything(42)
 
     p = dict(
         # dataset
-        time_range = '30days',
+        time_range = 'all',
         aggr_time = None,
-        batch_size = 64,
+        batch_size = 512,
         learning_rate = 1e-3,
         normalize = False,
         
@@ -87,8 +81,8 @@ if __name__ == "__main__":
             normalize=p['normalize'],
         )
         
-    model = Informer.load_from_checkpoint("spatio-temporal prediction/36jlvz18/checkpoints/epoch=105-step=1788749.ckpt")
-    wandb_logger = WandbLogger(project="spatio-temporal prediction", id='36jlvz18', resume=True)
+    # model = Informer.load_from_checkpoint("spatio-temporal prediction/36jlvz18/checkpoints/epoch=105-step=1788749.ckpt")
+    wandb_logger = WandbLogger(project="spatio-temporal prediction")
     wandb_logger.experiment.config["exp_tag"] = "Informer_{}".format('SW' if IS_SW else 'FG')
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -102,6 +96,6 @@ if __name__ == "__main__":
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=10)]
     )
 
-    # trainer.fit(model, dm)
+    trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
     trainer.predict(model, datamodule=dm)

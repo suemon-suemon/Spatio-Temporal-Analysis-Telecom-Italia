@@ -1,12 +1,7 @@
-from encodings import normalize_encoding
 from fix_path import fix_python_path_if_working_locally
 
 fix_python_path_if_working_locally()
 
-import os
-import torch
-
-import matplotlib.pyplot as plt
 from datasets import MilanFG
 from models import STDenseNet
 from pytorch_lightning import Trainer, seed_everything
@@ -17,8 +12,6 @@ from torch import nn
 
 
 if __name__ == "__main__":
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-    os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
     seed_everything(42)
 
@@ -32,7 +25,7 @@ if __name__ == "__main__":
         learning_rate = 1e-3,
 
         max_epochs = 500,
-        criterion = nn.L1Loss(),
+        criterion = nn.L1Loss,
         close_len = 6,
         period_len = 0,
         trend_len = 0,
