@@ -12,6 +12,9 @@ wandb/
 spatio-temporal prediction/
 lightning_logs/
 
+# vs code
+.vscode/
+
 # C extensions
 *.so
 
