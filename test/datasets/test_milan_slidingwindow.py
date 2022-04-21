@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from datasets import MilanSW
-from datasets.MilanSW import MilanSlidingWindowDataset
+from datasets.MilanSW import MilanSWStTranDataset, MilanSlidingWindowDataset
 from datasets.MilanSW import MilanSWInformerDataset
 
 
@@ -74,5 +74,32 @@ def test_milanSW_informer_dataset():
     assert(test_dataset[0][2][0] == -0.5)
 
 
+def test_milanSW_stTran_dataset():
+    test_milan_data = np.array([
+        [[2, 3, 4],
+         [3, 4, 5],
+         [4, 5, 6]],
+
+        [[3, 2, 1],
+         [0, 3, 4],
+         [6, 5, 4]],
+
+        [[2, 4, 0],
+         [0, 5, 3],
+         [3, 4, 3]],
+
+        [[1, 2, 1],
+         [0, 3, 1],
+         [2, 3, 10]]
+    ])
+    test_dataset = MilanSWStTranDataset(test_milan_data, aggr_time=None, close_len=2, out_len=1, K_grids=3)
+    assert len(test_dataset) == 18
+    np.testing.assert_array_equal(test_dataset[16][0], np.array([
+        [0, 3, 4, 6, 5, 4 ,0, 0, 0],
+        [0, 5, 3, 3, 4, 3, 0, 0, 0]
+    ]))
+    assert(test_dataset[17][1] == 10)
+    assert(test_dataset[0][2][0] == -0.5)
+
 if __name__ == "__main__":
-    test_milanSW_informer_dataset()
+    test_milanSW_stTran_dataset()

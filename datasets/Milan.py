@@ -6,6 +6,8 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from pytorch_lightning import LightningDataModule
 from utils.milano_grid import gen_cellids_by_colrow
+from networkx.generators import grid_2d_graph
+from networkx import adjacency_matrix
 
 class Milan(LightningDataModule):
     def __init__(self,
@@ -19,7 +21,7 @@ class Milan(LightningDataModule):
                  tele_column: str = 'internet',
                  time_range: str = 'all',
                  ):
-        super().__init__()
+        super(Milan, self).__init__()
         if aggr_time not in [None, 'hour']:
             raise ValueError("aggre_time must be None or 'hour'")
         self.aggr_time = aggr_time
@@ -41,6 +43,7 @@ class Milan(LightningDataModule):
         self.n_rows = grid_range[1] - grid_range[0] + 1
         self.n_cols = grid_range[3] - grid_range[2] + 1
         self.n_grids = self.n_rows * self.n_cols
+        self.adj_mx = adjacency_matrix(grid_2d_graph(self.n_rows, self.n_cols))
 
         self.normalize = normalize
         self.max_norm = max_norm
