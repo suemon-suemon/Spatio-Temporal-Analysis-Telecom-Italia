@@ -1,12 +1,9 @@
-from matplotlib import pyplot as plt
 from fix_path import fix_python_path_if_working_locally
 
 fix_python_path_if_working_locally()
 
-import os
-
 from datasets import MilanSW
-from models import STN
+from models import STN, STN_ConvLSTM, STN_3dConv
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -15,9 +12,6 @@ from torch import nn
 
 
 if __name__ == "__main__":
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-    os.environ["CUDA_VISIBLE_DEVICES"]="0"
-
     seed_everything(42)
 
     p = dict(
@@ -25,24 +19,23 @@ if __name__ == "__main__":
         time_range = '30days',
         aggr_time = None,
         batch_size = 1024,
-        learning_rate = 1e-3,
+        learning_rate = 1e-4,
         normalize = False,
         
         # model trainer
         max_epochs = 500,
-        criterion = nn.L1Loss(),
+        criterion = nn.L1Loss,
         x_dim = 11, 
         y_dim = 11,
         seq_len = 12,
     )
 
-    model = STN(
+    model = STN_3dConv(
         x_dim = p['x_dim'],
         y_dim = p['y_dim'],
         seq_len = p['seq_len'],
         learning_rate = p['learning_rate'],
     )
-    model = STN.load_from_checkpoint("spatio-temporal prediction/3k17i64o/checkpoints/epoch=75-step=153139.ckpt")
 
     dm = MilanSW(
         batch_size=p['batch_size'], 
@@ -53,7 +46,7 @@ if __name__ == "__main__":
         flatten=False,
     )
 
-    wandb_logger = WandbLogger(project="spatio-temporal prediction", id='3k17i64o', resume=True)
+    wandb_logger = WandbLogger(name='3d-conv-bias-64fc', project="spatio-temporal prediction")
     wandb_logger.experiment.config["exp_tag"] = "STN"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -61,9 +54,10 @@ if __name__ == "__main__":
         max_epochs=p['max_epochs'],
         logger=wandb_logger,
         gpus=1,
-        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=10)]
+        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=15)]
     )
+    trainer.logger.experiment.save('models/STN.py')
 
-    # trainer.fit(model, dm)
+    trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
     trainer.predict(model, datamodule=dm)

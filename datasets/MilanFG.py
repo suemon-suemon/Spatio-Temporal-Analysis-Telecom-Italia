@@ -204,6 +204,9 @@ class MilanFGStgcnDataset(Dataset):
         Y = self.milan_data[out_start_idx: out_start_idx+self.out_len].squeeze()
 
         Xc = X[:self.close_len].transpose(2, 1, 0)
-        Xp = X[self.close_len: self.close_len+self.period_len].transpose(2, 1, 0)
-        Xt = X[self.close_len+self.period_len: self.close_len+self.period_len+self.trend_len].transpose(2, 1, 0)
-        return Xc, Xp, Xt, Y
+        if self.period_len == 0 and self.trend_len == 0:
+            return [Xc], Y
+        else:
+            Xp = X[self.close_len: self.close_len+self.period_len].transpose(2, 1, 0)
+            Xt = X[self.close_len+self.period_len: self.close_len+self.period_len+self.trend_len].transpose(2, 1, 0)
+            return [Xc, Xp, Xt], Y
