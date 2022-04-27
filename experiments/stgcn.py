@@ -17,17 +17,17 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        aggr_time = None,
-        time_range = '30days',
+        aggr_time = 'hour',
+        time_range = 'all',
         normalize = False,
         batch_size = 16,
         learning_rate = 1e-3,
 
         max_epochs = 500,
         criterion = nn.L1Loss,
-        close_len = 3,
-        period_len = 3,
-        trend_len = 3,
+        close_len = 12,
+        period_len = 12,
+        trend_len = 12,
         out_len = 1,
 
         all_backbones = [
@@ -50,7 +50,9 @@ if __name__ == "__main__":
     model = ASTGCN(
         all_backbones = p['all_backbones'],
         adj_mx = dm.adj_mx,
+        in_len = p['close_len'],
         learning_rate = p['learning_rate'], 
+        criterion = p['criterion'],
     )
 
     wandb_logger = WandbLogger(project="spatio-temporal prediction")

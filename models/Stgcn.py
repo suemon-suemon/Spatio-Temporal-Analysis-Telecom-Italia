@@ -203,7 +203,7 @@ class ASTGCN(STBase):
                 ASTGCN_submodule(L_tilde, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, 
                                     time_strides, out_len, in_len, num_of_vertices))
         self.submodules = nn.ModuleList(self.submodules)
-        self.fusion_weights = nn.Parameter(torch.Tensor(3, 1, num_of_vertices, out_len))
+        self.fusion_weights = nn.Parameter(torch.Tensor(len(all_backbones), 1, num_of_vertices, out_len))
 
         self.save_hyperparameters()
         for p in self.parameters():
@@ -240,8 +240,8 @@ class ASTGCN(STBase):
         return torch.sum(self.fusion_weights * torch.stack(submodule_outputs), dim=0)
     
     def _process_one_batch(self, batch):
-        xc, xp, xt, y = batch
-        y_hat = self([xc, xp, xt])
+        x, y = batch
+        y_hat = self.forward(x)
         y = y.reshape(y.shape[0], -1, 1)
         return y_hat, y
 
