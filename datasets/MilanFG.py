@@ -81,7 +81,7 @@ class MilanFullGridDataset(Dataset):
                                         self.close_len, self.period_len, self.trend_len)
 
         X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
-        X = np.stack(X, axis=0)
+        X = np.stack(X, axis=0).astype(np.float32)
         X = X.reshape((1, X.shape[0], X.shape[1], X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
 
         Y = self.milan_data[out_start_idx: out_start_idx+self.out_len].squeeze()

@@ -6,3 +6,4 @@ from models.Informer import Informer
 from models.TransformerE import TransformerEncoder
 from models.STTran import STTran
 from models.Stgcn import ASTGCN
+from models.ViT import ViT
