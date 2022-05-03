@@ -1,3 +1,4 @@
+from asyncio.log import logger
 from fix_path import fix_python_path_if_working_locally
 
 fix_python_path_if_working_locally()
@@ -15,16 +16,15 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        aggr_time = 'hour',
-        time_range = 'all',
+        aggr_time = None,
+        time_range = '30days',
         normalize = True,
-        max_norm = 1,
         batch_size = 16,
         learning_rate = 1e-3,
-        grid_range = (41, 60 ,41, 60),
+        # grid_range = (41, 60 ,41, 60),
 
         max_epochs = 500,
-        criterion = nn.L1Loss(),
+        criterion = nn.L1Loss,
         close_len = 3,
         period_len = 0,
         trend_len = 0,
@@ -36,10 +36,9 @@ if __name__ == "__main__":
         period_len=p['period_len'], 
         trend_len=p['trend_len'],
         normalize=p['normalize'],
-        max_norm=p['max_norm'],
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
-        grid_range=p['grid_range'],
+        # grid_range=p['grid_range'],
     )
 
     model = Mvstgn(
@@ -56,9 +55,10 @@ if __name__ == "__main__":
     trainer = Trainer(
         max_epochs=p['max_epochs'],
         logger=wandb_logger,
-        gpus=1,
+        gpus=[1],
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
     )
+    trainer.logger.experiment.save('models/Mvstgn.py')
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)

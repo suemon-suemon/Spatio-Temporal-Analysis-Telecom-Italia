@@ -85,6 +85,7 @@ class DenseNetUnit(nn.Sequential):
 class STDenseNet(STBase):
     def __init__(self, 
                  channels: list=[3,3,0],
+                 grid_size = (30, 30),
                  **kwargs):
         """
         :param list channels: define channels of different Unit, a list of [close, peoriod, trend], defaults to [3,3,0]
@@ -100,8 +101,14 @@ class STDenseNet(STBase):
         self.save_hyperparameters()
 
         self.feature_close = DenseNetUnit(self.channels_close, 1)
-        self.feature_period = DenseNetUnit(self.channels_period, 1)
-        self.feature_trend = DenseNetUnit(self.channels_trend, 1)      
+        n_comp = 1
+        if self.channels_period > 0:
+            self.feature_period = DenseNetUnit(self.channels_period, 1)
+            n_comp += 1
+        if self.channels_trend > 0:
+            self.feature_trend = DenseNetUnit(self.channels_trend, 1)
+            n_comp += 1
+        self.fusion_weights = nn.Parameter(torch.Tensor(n_comp, *grid_size))
 
     def forward(self, x):
         x = x.squeeze() 
@@ -110,7 +117,9 @@ class STDenseNet(STBase):
         xt = x[:, self.channels_close+self.channels_period:self.channels_close+self.channels_period+self.channels_trend, :, :]
         out = self.feature_close(xc)
         if self.channels_period > 0:
-            out += self.feature_period(xp)
+            out = torch.stack((out, self.feature_period(xp)), dim=1)
         if self.channels_trend > 0:
-            out += self.feature_trend(xt)
-        return torch.sigmoid(out)
+            out = torch.stack((out, self.feature_trend(xt)), dim=1)
+        if len(out.shape) == 3:
+            out = out.unsqueeze(1)
+        return torch.sigmoid(torch.sum(self.fusion_weights * out, dim=1))

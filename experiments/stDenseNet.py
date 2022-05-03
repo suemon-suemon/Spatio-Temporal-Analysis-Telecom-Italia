@@ -20,15 +20,14 @@ if __name__ == "__main__":
         aggr_time = None,
         time_range = '30days',
         normalize = True,
-        max_norm = 1,
         batch_size = 64,
         learning_rate = 1e-3,
 
         max_epochs = 500,
         criterion = nn.L1Loss,
-        close_len = 6,
-        period_len = 0,
-        trend_len = 0,
+        close_len = 3,
+        period_len = 3,
+        trend_len = 3,
     )
 
     dm = MilanFG(
@@ -37,7 +36,6 @@ if __name__ == "__main__":
         period_len=p['period_len'], 
         trend_len=p['trend_len'],
         normalize=p['normalize'],
-        max_norm=p['max_norm'],
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
     )
@@ -58,6 +56,7 @@ if __name__ == "__main__":
         gpus=1,
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=50, verbose=True)]
     )    
+    trainer.logger.experiment.save('models/STDenseNet.py')
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
