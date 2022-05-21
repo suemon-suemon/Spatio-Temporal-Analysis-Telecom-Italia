@@ -81,6 +81,44 @@ class Transformer(nn.Module):
             x = ff(x) + x
         return x
 
+
+class PyramidDecoder(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super().__init__()
+        self.conv1 = nn.Sequential(nn.Unflatten(2, (4, 4)),
+                                   nn.Conv2d(1, 4, (1, 1), padding=0),
+                                   nn.ConvTranspose2d(4, 4, (2, 2), stride=2),
+                                   nn.Conv2d(4, 8, (1, 1), padding=0),
+                                   nn.ReLU())
+        self.linear2 = nn.Sequential(nn.Flatten(1, 2),
+                                     nn.Linear(10 * 16, 8 * 8 * 8),
+                                     nn.Unflatten(1, (8, 8, 8)))
+        self.conv2 = nn.Sequential(nn.Conv2d(8, 16, (1, 1), padding=0),
+                                   nn.ConvTranspose2d(16, 16, (2, 2), stride=2),
+                                   nn.Conv2d(16, 8, (1, 1), padding=0),
+                                   nn.ReLU())
+        self.linear3 = nn.Sequential(nn.Flatten(1, 2),
+                                     nn.Linear(40*16, 8*16*16),
+                                     nn.Unflatten(1, (8, 16, 16)))
+        self.conv3 = nn.Sequential(nn.Conv2d(8, 8, (1, 1), padding=0),
+                                   nn.ConvTranspose2d(8, 8, (2, 2), stride=2, padding=1),
+                                   nn.Conv2d(8, 2, (1, 1), padding=0),
+                                   nn.ReLU())
+        self.linear4 = nn.Sequential(nn.Flatten(1, 2),
+                                     nn.Linear(100*16, 2*30*30),
+                                     nn.Unflatten(1, (2, 30, 30)))
+        self.conv4 = nn.Conv2d(2, 1, (1, 1), padding=0)
+        
+    def forward(self, x):
+        x1 = self.conv1(x[:, 0:1, :]) # output shape 4, 8, 8
+        t2 = self.linear2(x[:, 1:11, :]) # output shape 4, 8, 8
+        x2 = self.conv2(x1 + t2)
+        t3 = self.linear3(x[:, 11:51, :])
+        x3 = self.conv3(x2 + t3)
+        t4 = self.linear4(x[:, 51:, :])
+        x4 = self.conv4(x3 + t4)
+        return x4
+
 class ViT(STBase):
     def __init__(self, *, image_size, # (11, 11)
                           patch_size, # (3, 3)
@@ -121,17 +159,20 @@ class ViT(STBase):
 
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
 
-        self.pool = pool
-        self.to_latent = nn.Identity()
+        self.decoder = PyramidDecoder(dim, None)
 
-        self.mlp_head = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, dim//2),
-            nn.ReLU(),
-            nn.Linear(dim//2, pred_len),
-        )
+        # self.pool = pool
+        # self.to_latent = nn.Identity()
+
+        # self.mlp_head = nn.Sequential(
+        #     nn.LayerNorm(dim),
+        #     nn.Linear(dim, dim//2),
+        #     nn.ReLU(),
+        #     nn.Linear(dim//2, pred_len),
+        # )
 
     def forward(self, img):
+        img = img.squeeze(1)
         x = self.to_patch_embedding(img)
         b, n, _ = x.shape
 
@@ -141,8 +182,11 @@ class ViT(STBase):
         x = self.dropout(x)
 
         x = self.transformer(x)
+        x = self.decoder(x)
+        x = x.squeeze(1)
+        return x
 
-        x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
+        # x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
 
-        x = self.to_latent(x)
-        return self.mlp_head(x)
+        # x = self.to_latent(x)
+        # return self.mlp_head(x)

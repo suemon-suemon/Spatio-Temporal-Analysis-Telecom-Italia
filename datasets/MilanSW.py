@@ -71,13 +71,13 @@ class MilanSlidingWindowDataset(Dataset):
                  flatten: bool = True,):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
         self.milan_data = milan_data
-        self.pad_size = window_size // 2
         self.window_size = window_size
         self.input_len = input_len
         self.flatten = flatten
+        pad_size = window_size // 2
         self.milan_data_pad = np.pad(self.milan_data,
-                                     ((0, 0), (self.pad_size, self.pad_size),
-                                      (self.pad_size, self.pad_size)),
+                                     ((0, 0), (pad_size, pad_size),
+                                      (pad_size, pad_size)),
                                      'constant', constant_values=0)
 
     def __len__(self):
@@ -108,17 +108,17 @@ class MilanSW3CompDataset(Dataset):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
         self.milan_data = milan_data
         self.time_level = aggr_time
-        self.pad_size = window_size // 2
-        self.window_size = window_size
         self.close_len = close_len
         self.period_len = period_len
         self.in_len = close_len
         self.flatten = flatten
         self.out_len = 1
+        self.window_size = window_size
+        pad_size = window_size // 2
         self.milan_data_pad = np.pad(self.milan_data,
-                                     ((0, 0), (self.pad_size, self.pad_size),
-                                      (self.pad_size, self.pad_size)),
-                                     'constant', constant_values=0)
+                                    ((0, 0), (pad_size, pad_size),
+                                    (pad_size, pad_size)),
+                                    'constant', constant_values=0)
 
     def __len__(self):
         return (self.milan_data.shape[0] - self.in_len) * self.milan_data.shape[1] * self.milan_data.shape[2]
@@ -131,12 +131,13 @@ class MilanSW3CompDataset(Dataset):
             self.milan_data.shape[1] * self.milan_data.shape[2])) % self.milan_data.shape[2]
         out_start_idx = n_slice + self.in_len
         
-        idx_grid_data = self.milan_data_pad[:, n_row:n_row+self.window_size,
-                                           n_col:n_col+self.window_size]
         indices = get_indexes_of_train('default', self.time_level, out_start_idx, self.close_len, self.period_len)
-        X = np.array([idx_grid_data[i] if i >= 0 else np.zeros((self.window_size, self.window_size)) for i in indices], dtype=np.float32)
+        spatial_window = (self.window_size, self.window_size)
+        idx_grid_data = self.milan_data_pad[:, n_row:n_row+self.window_size,
+                                        n_col:n_col+self.window_size]
+        X = np.array([idx_grid_data[i] if i >= 0 else np.zeros(spatial_window) for i in indices], dtype=np.float32)
         if self.flatten:
-            X = X.reshape((-1, self.window_size * self.window_size))
+            X = X.reshape((-1, spatial_window[0] * spatial_window[1]))
         Y = self.milan_data[out_start_idx: out_start_idx+self.out_len, n_row, n_col]
         return (X, Y)
 
@@ -153,13 +154,13 @@ class MilanSWInformerDataset(Dataset):
         self.milan_data = milan_data
         self.timestamps = time_features(timestamps, timeenc=1,
                                         freq='h' if aggr_time == 'hour' else 't')
-        self.pad_size = window_size // 2
+        pad_size = window_size // 2
         self.window_size = window_size
         self.input_len = input_len
         self.label_len = label_len
         self.milan_data_pad = np.pad(self.milan_data,
-                                     ((0, 0), (self.pad_size, self.pad_size),
-                                      (self.pad_size, self.pad_size)),
+                                     ((0, 0), (pad_size, pad_size),
+                                      (pad_size, pad_size)),
                                      'constant', constant_values=0)
     
     def __len__(self):

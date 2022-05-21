@@ -164,11 +164,12 @@ class Milan(LightningDataModule):
         milan_grid_data = milan_data.reset_index().pivot(index='time', columns='cellid', values=self.tele_column)
         milan_grid_data = milan_grid_data.replace([np.inf, -np.inf], np.nan)
         milan_grid_data = milan_grid_data.fillna(0).values
+        # for debug -> set max to 2000
+        # milan_grid_data = milan_grid_data.clip(max=1000.)
 
         if self.normalize:
             self.scaler = MinMaxScaler((0, self.max_norm))
             milan_grid_data = self.scaler.fit_transform(milan_grid_data.reshape(-1, 1)).reshape(milan_grid_data.shape)
-            # milan_grid_data = scaler.fit_transform(milan_grid_data)
         # Input and parameter tensors are not the same dtype, found input tensor with Double and parameter tensor with Float
         self.milan_grid_data = milan_grid_data.astype(np.float32)
         print("loaded {} rows and {} grids".format(milan_grid_data.shape[0], milan_grid_data.shape[1]))

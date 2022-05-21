@@ -9,7 +9,7 @@ from utils.milan_data import get_indexes_of_train
 class MilanFG(Milan):
     """ Milan Dataset in a full-grid fashion """
     def __init__(self, 
-                 format: str = 'normal',
+                 format: str = 'default',
                  close_len: int = 12, 
                  period_len: int = 0,
                  trend_len: int = 0,
@@ -41,7 +41,7 @@ class MilanFG(Milan):
         return self.test_dataloader()
 
     def _get_dataset(self, data, stage):
-        if self.format == 'normal':
+        if self.format == 'default':
             return MilanFullGridDataset(data, self.aggr_time, self.close_len, 
                                             self.period_len, self.trend_len, self.out_len)
         elif self.format == 'informer':
