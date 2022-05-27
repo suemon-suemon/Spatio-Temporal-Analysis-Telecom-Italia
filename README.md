@@ -21,4 +21,4 @@
 | MVSTGN               | Spatio-temporal | Full grid      |              47.848\| 147.858               |        16.973\| 56.853        |        156.780\| 408.457        |
 | STGCN                | Spatio-temporal | Full grid      |               28.662\| 58.667               |        14.742\| 40.747        |        255.056\| 480.541        |
 | ViT-Pyramid          | Spatio-temporal | Full grid      |               27.115\| 53.869               |         24.239\| 41.66         |                                  |
-| ViT                  | Spatio-temporal | Full grid      |           ***25.84\|51.563 ***              |                                |                                  |
+| ViT                  | Spatio-temporal | Full grid      |           ***25.84***\|***51.563***          |                                |                                  |
