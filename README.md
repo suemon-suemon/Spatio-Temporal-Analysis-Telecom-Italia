@@ -15,7 +15,7 @@
 | Informer             | Time Series +   | Sliding Window |        26.003\| 53.063        | ***11.568*** \| 24.009        | ***74.6274*** \| 171.131         |
 | StTran               | Spatio-temporal | Sliding Window |        27.875\| 56.149        |        11.896\| 24.597        |              -\| -               |
 | ViT                  | Spatio-temporal | Sliding Window | ***25.414*** \| 53.514        |             -\| -             |              -\| -               |
-<br/>
+| - | - | - | - | - | - |
 | MLP                  | Time Series     | Full grid      | ***26.562***\| ***52.882***   |         -\| -                 |        -\| -                     |
 | ST-DenseNet          | Spatio-temporal | Full grid      |        46.952\| 154.664       |        33.475\| 75.603        |        203.403\| 517.890         |
 | MVSTGN               | Spatio-temporal | Full grid      |        47.848\| 147.858       |        16.973\| 56.853        |        156.780\| 408.457         |
