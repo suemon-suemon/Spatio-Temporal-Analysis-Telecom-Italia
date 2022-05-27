@@ -7,3 +7,5 @@ from models.TransformerE import TransformerEncoder
 from models.STTran import STTran
 from models.Stgcn import ASTGCN
 from models.ViT import ViT
+from models.ViT_pyramid import ViT_pyramid
+from models.MLP import MLP

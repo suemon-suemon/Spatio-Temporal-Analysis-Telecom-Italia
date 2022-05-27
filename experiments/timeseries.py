@@ -12,9 +12,9 @@ import pmdarima as pm
 from datasets import Milan
 from joblib import Parallel, delayed
 from prophet import Prophet
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
 from statsmodels.tsa.forecasting.theta import ThetaModel
-from torchmetrics import MeanAbsoluteError
+# from torchmetrics import MeanAbsoluteError
 from tqdm import tqdm
 from utils.nrmse import nrmse
 from utils.tqdm_joblib import tqdm_joblib
@@ -64,9 +64,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Rolling forward timeseries baseline runner')
     parser.add_argument('--method', help='baseline method')
     args = parser.parse_args()
+    time_range = 'all'
+    aggr_time = 'hour'
 
     ## prepare data
-    milan = Milan(time_range='30days', tele_column='internet')
+    milan = Milan(time_range=time_range, aggr_time=aggr_time, tele_column='internet')
     milan.prepare_data()
     milan.setup()
     milan_train = np.concatenate((milan.milan_train, milan.milan_val), axis=0)
@@ -127,9 +129,10 @@ if __name__ == "__main__":
         toc = time.time()
         print('Prophet Runing time:', toc - tic)
 
-    np.save('experiments/results/milan_{}_{}_pred_step1.npy'.format(args.method, 'internet'), grid_pred)
+    np.save('experiments/results/milan_{}_{}_{}_{}_pred_step1.npy'.format(args.method, 'internet', time_range, aggr_time), grid_pred)
     mae = np.mean([mean_absolute_error(milan_test[:, i], grid_pred[:, i]) for i in range(n_series)])
     mape = np.mean([mean_absolute_percentage_error(milan_test[:, i], grid_pred[:, i]) for i in range(n_series)])
+    rmse = mean_squared_error(milan_test, grid_pred, squared=False)
     nrmse = nrmse(milan_test, grid_pred)
 
-    print('Method: ', args.method, 'MAE: ', mae, ' MAPE: ', mape, ' NRMSE: ', nrmse)
+    print('Method: ', args.method, 'MAE: ', mae, ' MAPE: ', mape, 'RMSE: ', rmse,' NRMSE: ', nrmse)
