@@ -25,7 +25,7 @@ class STTran(STBase):
     def __init__(self, 
                  close_len = 3,
                  period_len = 3, 
-                 out_len = 3,
+                 pred_len = 3,
                  k_grids = 20,
                  q_grids = 20,
                  sp_dmodel = 64,
@@ -35,7 +35,7 @@ class STTran(STBase):
         kwargs['reduceLRPatience'] = 2
         super(STTran, self).__init__(**kwargs)   
         self.seq_len = close_len
-        self.out_len = out_len
+        self.pred_len = pred_len
         self.k_grids = k_grids
         self.save_hyperparameters()
 
@@ -43,18 +43,18 @@ class STTran(STBase):
         # Spatial Encoding
         self.sp_pos_encoder = PositionalEncoding(sp_dmodel)
         self.sp_target_embedding = nn.Linear(close_len, sp_dmodel)
-        self.sp_linear = nn.Linear(sp_dmodel, out_len)
+        self.sp_linear = nn.Linear(sp_dmodel, pred_len)
         self.spatial_tran = nn.Transformer(d_model=sp_dmodel, nhead=8, batch_first=True) # default layers 6
         # Close Encoding
         self.cl_pos_encoder = PositionalEncoding(cl_dmodel)
         self.cl_target_embedding = nn.Linear(q_grids, cl_dmodel)
         self.cl_init_embedding = nn.Linear(close_len, cl_dmodel)
-        self.cl_linear = nn.Linear(cl_dmodel, out_len)
+        self.cl_linear = nn.Linear(cl_dmodel, pred_len)
         self.close_tran = nn.Transformer(d_model=cl_dmodel, nhead=8, batch_first=True)
         # Period Encoding
         self.pe_pos_encoder = PositionalEncoding(pe_dmodel)
         self.pe_target_embedding = nn.Linear(close_len, pe_dmodel)
-        self.pe_linear = nn.Linear(pe_dmodel, out_len)
+        self.pe_linear = nn.Linear(pe_dmodel, pred_len)
         self.period_tran = nn.Transformer(d_model=pe_dmodel, nhead=8, batch_first=True)
         # Temporal Fusion
         # self.fusion_linear = nn.Linear(cl_dmodel + pe_dmodel, 1)
@@ -68,7 +68,7 @@ class STTran(STBase):
         # xp: [batch, period_len, close_len]
         # xs: [batch, K_grids, close_len]
         (B, P, C) = xp.shape
-        K, O = self.k_grids, self.out_len
+        K, O = self.k_grids, self.pred_len
 
         # Spatial Encoding
         xs_src = xs # (B, K, C)

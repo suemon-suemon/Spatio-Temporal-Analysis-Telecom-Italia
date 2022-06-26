@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from einops import rearrange
+from einops import rearrange, repeat
 from torch import nn
 
 from models.STBase import STBase
@@ -14,12 +14,17 @@ class MLP(STBase):
                           **kwargs):
         super(MLP, self).__init__(**kwargs)
         seq_len = close_len + period_len
+        self.pred_len = pred_len
         self.MLP = nn.Sequential(nn.Linear(seq_len, mlp_dim),
+                                 nn.ReLU(),
+                                 nn.Linear(mlp_dim, mlp_dim),
                                  nn.ReLU(),
                                  nn.Linear(mlp_dim, pred_len))
 
     def forward(self, img):
         img = img.squeeze(1)
         x = rearrange(img, 'b s h w -> b h w s')
-        x = self.MLP(x).squeeze(3)
-        return x + torch.mean(img, dim=1)
+        x = self.MLP(x)
+        x = rearrange(x, 'b h w s -> b s h w')
+        res = repeat(torch.mean(img, dim=1), 'b h w -> b s h w', s=self.pred_len)
+        return x + res

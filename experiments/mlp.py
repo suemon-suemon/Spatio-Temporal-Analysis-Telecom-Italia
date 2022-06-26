@@ -16,23 +16,24 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = '30days',
-        aggr_time = None,
-        batch_size = 32,
+        time_range = 'all',
+        aggr_time = 'hour',
+        batch_size = 64,
         learning_rate = 1e-4,
         normalize = False,
         
         # model trainer
-        max_epochs = 500,
+        max_epochs = 1000,
         criterion = nn.L1Loss,
-        close_len = 6,
+        close_len = 12,
         period_len = 0,
-        mlp_dim = 64,
+        pred_len = 1,
+        mlp_dim = 256,
     )
 
     model = MLP(
         mlp_dim=p['mlp_dim'],
-        pred_len=1,
+        pred_len=p['pred_len'],
         close_len=p['close_len'],
         period_len=p['period_len'],
         learning_rate=p['learning_rate'],
@@ -45,9 +46,11 @@ if __name__ == "__main__":
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
         normalize=p['normalize'],
+        pred_len=p['pred_len'],
     )
 
-    wandb_logger = WandbLogger(name='MLP-res', project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(name=f"MLP2_HI_{'hr' if p['aggr_time']=='hour' else 'min'}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}", 
+                               project="spatio-temporal prediction")
     wandb_logger.experiment.config["exp_tag"] = "MLP"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.sparse.linalg import eigs
+from einops import rearrange, repeat
 
 from models.STBase import STBase
 
@@ -174,7 +175,7 @@ class ASTGCN(STBase):
                  all_backbones,
                  adj_mx,
                  in_len = 3,
-                 out_len = 1,
+                 pred_len = 1,
                  nb_block = 2,
                  **kwargs):
         '''
@@ -188,7 +189,7 @@ class ASTGCN(STBase):
         if len(all_backbones) <= 0:
             raise ValueError("The length of all_backbones must be greater than 0")
         in_channels = 1
-        self.out_len = out_len
+        self.pred_len = pred_len
         self.seq_len = in_len
         K = 3
         num_of_vertices = adj_mx.shape[0]
@@ -201,9 +202,9 @@ class ASTGCN(STBase):
             time_strides = backbones['time_strides']
             self.submodules.append(
                 ASTGCN_submodule(L_tilde, nb_block, in_channels, K, nb_chev_filter, nb_time_filter, 
-                                    time_strides, out_len, in_len, num_of_vertices))
+                                    time_strides, pred_len, in_len, num_of_vertices))
         self.submodules = nn.ModuleList(self.submodules)
-        self.fusion_weights = nn.Parameter(torch.Tensor(len(all_backbones), 1, num_of_vertices, out_len))
+        self.fusion_weights = nn.Parameter(torch.Tensor(len(all_backbones), 1, num_of_vertices, pred_len))
 
         self.save_hyperparameters()
         for p in self.parameters():
@@ -234,15 +235,20 @@ class ASTGCN(STBase):
         if len(batch_size_set) != 1:
             raise ValueError("Input values must have same batch size!")
 
+        res = torch.mean(rearrange(x_list[0], 'b n f t -> b (t f) n'), dim=1)
+        res = repeat(res, 'b n -> b t n', t=self.pred_len)
+
         submodule_outputs = [self.submodules[idx](x_list[idx])
                              for idx in range(len(x_list))]
         
-        return torch.sum(self.fusion_weights * torch.stack(submodule_outputs), dim=0)
+        out = torch.sum(self.fusion_weights * torch.stack(submodule_outputs), dim=0)
+        out = rearrange(out, 'b n t -> b t n')
+        return res + out
     
     def _process_one_batch(self, batch):
         x, y = batch
         y_hat = self.forward(x)
-        y = y.reshape(y.shape[0], -1, 1)
+        y_hat = y_hat.reshape_as(y)
         return y_hat, y
 
 

@@ -21,11 +21,14 @@ class STBase(LightningModule):
     def __init__(self,
                  learning_rate: float = 1e-5,
                  criterion = L1Loss,
-                 reduceLRPatience: int = 5,):
+                 reduceLRPatience: int = 5,
+                 show_fig: bool = False,
+                 ):
         super().__init__()
         self.learning_rate = learning_rate
         self.criterion = criterion()
         self.reduceLRPatience = reduceLRPatience
+        self.show_fig = show_fig
         self.save_hyperparameters()
 
         self.valid_MAE = MeanAbsoluteError()
@@ -54,6 +57,8 @@ class STBase(LightningModule):
     def _process_one_batch(self, batch):
         x, y = batch
         y_hat = self(x)
+        if self.pred_len == 1:
+            y = y.unsqueeze(1)
         return y_hat, y
 
     def training_step(self, batch, batch_idx):
@@ -107,34 +112,44 @@ class STBase(LightningModule):
     def validation_epoch_end(self, validation_step_outputs):
         if self.trainer.sanity_checking:
             return
-        y_hat, y = zip(*validation_step_outputs)
-        preds = torch.cat(y_hat, dim=0).reshape(-1, self.trainer.datamodule.n_grids).cpu().detach().numpy()
-        gt = torch.cat(y, dim=0).reshape(-1, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+            
+        if self.show_fig:
+            y_hat, y = zip(*validation_step_outputs)
+            y_hat = torch.cat(y_hat, dim=0)
+            y = torch.cat(y, dim=0)
 
-        fig1, fig2, grid = self._vis_gt_preds_topk(gt, preds)
-        self.logger.log_image('val_top9', [wandb.Image(fig1)])
-        self.logger.log_image('val_low9', [wandb.Image(fig2)])
-        self.logger.log_image('val_grid', [wandb.Image(grid)])
-        plt.close('all')
+            pred_len = y_hat.shape[1]
+            if len(y_hat[0].shape) == 2:
+                preds = y_hat.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
+                gt = y.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
+            else:
+                preds = y_hat.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+                gt = y.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+
+            self._vis_gt_preds_topk(gt, preds, step='val', save_flag=True)
 
     def on_predict_epoch_end(self, results):
         save_dir = os.path.join(self.result_dir, str(self.logger.version))
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        preds = torch.cat(results[0]).reshape(-1, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+        results = torch.cat(results[0])
+        pred_len = results.shape[1]
+        if len(results[0].shape) == 2:
+            preds = results.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
+        else:
+            results = results.view(-1, pred_len, self.trainer.datamodule.n_grids)
+            preds = results.cpu().detach().numpy()
         np.savez_compressed(os.path.join(save_dir, "preds.npz"), preds)
 
         gt = self.trainer.datamodule.milan_test[self.seq_len:].reshape(-1, self.trainer.datamodule.n_grids)
-        self.logger.log_metrics({'test_nrmse': nrmse(preds, gt)})
         if self.trainer.datamodule.normalize:
             gt = self.trainer.datamodule.scaler.inverse_transform(gt.reshape(-1, 1)).reshape(gt.shape)
+        if pred_len > 1:
+            gt = np.stack([gt[i:i+pred_len] for i in range(gt.shape[0]-pred_len+1)], axis=0)
+        # self.logger.log_metrics({'test_nrmse': nrmse(preds, gt)})
         
-        fig1, fig2, grid = self._vis_gt_preds_topk(gt, preds, save_flag=True)
-        self.logger.log_image('pred_top9', [wandb.Image(fig1)])
-        self.logger.log_image('pred_low9', [wandb.Image(fig2)])
-        self.logger.log_image('pred_grid', [wandb.Image(grid)])
-        plt.close('all')
+        self._vis_gt_preds_topk(gt, preds, step='pred', save_flag=True)
 
     def _inverse_transform(self, y):
         yn = y.detach().cpu().numpy() # detach from computation graph
@@ -142,25 +157,35 @@ class STBase(LightningModule):
         yn = scaler.inverse_transform(yn.reshape(-1, 1)).reshape(yn.shape)
         return torch.from_numpy(yn).cuda()
 
-    def _vis_gt_preds_topk(self, gt, preds, *, save_flag=False):
-        top9_mean_fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(10, 10))
-        top9ind = np.argpartition(np.mean(gt, axis=0), -9)[-9:]
-        for i in range(9):
-            axes[i // 3, i % 3].plot(gt[:, top9ind[i]], label="gt")
-            axes[i // 3, i % 3].plot(preds[:, top9ind[i]], label="pred")
-            axes[i // 3, i % 3].set_title(f"{top9ind[i]}: MAE: {mean_absolute_error(preds[:, top9ind[i]], gt[:, top9ind[i]]):9.4f}")
-            axes[i // 3, i % 3].legend()
-        
-        low9_mean_fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(10, 10))
-        low9ind = np.argpartition(np.mean(gt, axis=0), 9)[:9]
-        for i in range(9):
-            axes[i // 3, i % 3].plot(gt[:, low9ind[i]], label="gt")
-            axes[i // 3, i % 3].plot(preds[:, low9ind[i]], label="pred")
-            axes[i // 3, i % 3].set_title(f"{low9ind[i]}: MAE: {mean_absolute_error(preds[:, low9ind[i]], gt[:, low9ind[i]]):9.4f}")
-            axes[i // 3, i % 3].legend()
+    def _vis_gt_preds_topk(self, gt, preds, *, step, save_flag=False):
+        pred_len = gt.shape[1]
+        top9_mae_imglist = []
+        low9_mae_imglist = []
+        for p in range(pred_len):
+            gt_i = gt[:, p, :]
+            pred_i = preds[:, p, :]
+            top9_mean_fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(10, 10))
+            top9ind = np.argpartition(np.mean(gt_i, axis=0), -9)[-9:]
+            for i in range(9):
+                axes[i // 3, i % 3].plot(gt_i[:, top9ind[i]], label="gt")
+                axes[i // 3, i % 3].plot(pred_i[:, top9ind[i]], label="pred")
+                axes[i // 3, i % 3].set_title(f"{top9ind[i]}: MAE: {mean_absolute_error(pred_i[:, top9ind[i]], gt_i[:, top9ind[i]]):9.4f}")
+                axes[i // 3, i % 3].legend()
+            top9_mae_imglist.append(top9_mean_fig)
+            
+            low9_mean_fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(10, 10))
+            low9ind = np.argpartition(np.mean(gt_i, axis=0), 9)[:9]
+            for i in range(9):
+                axes[i // 3, i % 3].plot(gt_i[:, low9ind[i]], label="gt")
+                axes[i // 3, i % 3].plot(pred_i[:, low9ind[i]], label="pred")
+                axes[i // 3, i % 3].set_title(f"{low9ind[i]}: MAE: {mean_absolute_error(pred_i[:, low9ind[i]], gt_i[:, low9ind[i]]):9.4f}")
+                axes[i // 3, i % 3].legend()
+            low9_mae_imglist.append(low9_mean_fig)
 
+        gt_flatten = gt.reshape(-1, self.trainer.datamodule.n_grids)
+        pred_flatten = preds.reshape(-1, self.trainer.datamodule.n_grids)
         top9_mae_grid = plt.figure(figsize=(30, 15))
-        top9_mae_indexes = np.argpartition(np.sum(np.absolute(gt-preds), axis=1), -9)[-9:]
+        top9_mae_indexes = np.argpartition(np.sum(np.absolute(gt_flatten-pred_flatten), axis=1), -9)[-9:]
         outer = gridspec.GridSpec(3, 3, wspace=0.1, hspace=0.1)
         rows, cols = self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols
         for i in range(9):
@@ -170,8 +195,8 @@ class STBase(LightningModule):
             _y = np.arange(cols)
             _xx, _yy = np.meshgrid(_x, _y)
             x, y = _xx.ravel(), _yy.ravel()
-            z_gt = gt[top9_mae_indexes[i], :]
-            z_pred = preds[top9_mae_indexes[i], :]
+            z_gt = gt_flatten[top9_mae_indexes[i], :]
+            z_pred = pred_flatten[top9_mae_indexes[i], :]
             bottom = np.zeros_like(z_gt)
 
             cmap = cm.get_cmap('jet') # Get desired colormap - you can change this!
@@ -192,8 +217,12 @@ class STBase(LightningModule):
             save_dir = os.path.join(self.result_dir, str(self.logger.version))
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
-            plt.savefig(os.path.join(save_dir, "preds_top9.png"))
-            plt.savefig(os.path.join(save_dir, "preds_low9.png"))
-            plt.savefig(os.path.join(save_dir, "preds_top9_mae_grid.png"))
+            [img.savefig(os.path.join(save_dir, f"preds_top9_{i}.png")) for i, img in enumerate(top9_mae_imglist)]
+            [img.savefig(os.path.join(save_dir, f"preds_low9_{i}.png")) for i, img in enumerate(low9_mae_imglist)]
+            top9_mae_grid.savefig(os.path.join(save_dir, "preds_top9_mae_grid.png"))
         
-        return top9_mean_fig, low9_mean_fig, top9_mae_grid
+        if hasattr(self.logger, 'log_image'):
+            [self.logger.log_image(f'{step}_top9_{i}', [wandb.Image(img)]) for i, img in enumerate(top9_mae_imglist)]
+            [self.logger.log_image(f'{step}_low9_{i}', [wandb.Image(img)]) for i, img in enumerate(low9_mae_imglist)]
+            self.logger.log_image(f'{step}_grid', [wandb.Image(top9_mae_grid)])
+        plt.close('all')

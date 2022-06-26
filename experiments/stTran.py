@@ -16,8 +16,8 @@ if __name__ == "__main__":
     p = dict(
         # dataset
         time_range = 'all',
-        aggr_time = None,
-        batch_size = 1024,
+        aggr_time = 'hour',
+        batch_size = 512,
         learning_rate = 1e-3,
         normalize = True,
         
@@ -25,7 +25,7 @@ if __name__ == "__main__":
         max_epochs = 500,
         criterion = nn.L1Loss,
 
-        out_len = 1,
+        pred_len = 1,
         close_len = 3,
         period_len = 3,
         k_grids = 20,
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     model = STTran(
         close_len = p['close_len'],
         period_len = p['period_len'], 
-        out_len = p['out_len'],
+        pred_len = p['pred_len'],
         k_grids = p['k_grids'],
         learning_rate = p['learning_rate'],
         criterion = p['criterion']
@@ -45,13 +45,13 @@ if __name__ == "__main__":
         batch_size=p['batch_size'],
         close_len=p['close_len'], 
         period_len=p['period_len'], 
-        out_len = p['out_len'],
+        out_len = p['pred_len'],
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
         normalize=p['normalize'],
     )
     
-    wandb_logger = WandbLogger(project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(name='stTran_in3_pred1_min', project="spatio-temporal prediction")
     wandb_logger.experiment.config["exp_tag"] = "StTran"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')

@@ -3,7 +3,7 @@ from fix_path import fix_python_path_if_working_locally
 fix_python_path_if_working_locally()
 
 from datasets import MilanSW, MilanFG
-from models import ViT, ViT_pyramid
+from models import ViT, ViT_matrix
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -16,41 +16,46 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = '30days',
-        aggr_time = None,
+        time_range = 'all',
+        aggr_time = 'hour',
         # data_format = '3comp',
-        batch_size = 32,
+        batch_size = 64,
         learning_rate = 1e-4,
         normalize = False,
+
+        close_len = 24,
+        period_len = 0,
+        pred_len = 3,
         
         # model trainer
-        max_epochs = 500,
+        max_epochs = 1000,
         criterion = nn.L1Loss,
         # spatial_window = 11,
-        close_len = 6,
-        period_len = 0,
         patch_size = (3, 3),
         stride_size = (3, 3),
-        vit_dim = 64,
-        vit_heads = 32,
+        padding_size = (0, 0),
+        vit_dim = 128,
+        vit_heads = 64,
         vit_depth = 6,
-        mlp_dim = 64,
+        mlp_dim = 256,
         pool = 'cls',
     )
 
-    model = ViT_pyramid(
+    model = ViT_matrix(
         image_size=(30, 30),
         patch_size=p['patch_size'],
         stride_size=p['stride_size'],
+        padding_size=p['padding_size'],
         dim=p['vit_dim'],
         depth=p['vit_depth'],
         heads=p['vit_heads'],
         mlp_dim=p['mlp_dim'],
-        pred_len=1,
+        pred_len=p['pred_len'],
         close_len=p['close_len'],
         period_len=p['period_len'],
         learning_rate=p['learning_rate'],
         pool=p['pool'],
+        channels_group=p['pred_len'],
     )
 
     # dm = MilanSW(
@@ -62,19 +67,24 @@ if __name__ == "__main__":
     #     time_range=p['time_range'],
     #     normalize=p['normalize'],
     #     window_size=p['spatial_window'],
-    #     flatten=False,
+    #     flatten=False, 
     # )
 
     dm = MilanFG(
+        format='timeF',
         batch_size=p['batch_size'], 
         close_len=p['close_len'], 
         period_len=p['period_len'],
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
         normalize=p['normalize'],
+        pred_len=p['pred_len'],
     )
 
-    wandb_logger = WandbLogger(name='vitL_MLP', project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(
+        name=f"vitM_MLP_{'hr' if p['aggr_time']=='hour' else 'min'}(last7)_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}_conv3dFL(c)", 
+        project="spatio-temporal prediction"
+    )
     wandb_logger.experiment.config["exp_tag"] = "ViT"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
