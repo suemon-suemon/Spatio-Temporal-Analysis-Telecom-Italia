@@ -16,16 +16,16 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = 'all',
-        aggr_time = 'hour',
+        time_range = '30days',
+        aggr_time = None,
         # data_format = '3comp',
-        batch_size = 64,
+        batch_size = 16,
         learning_rate = 1e-4,
         normalize = False,
 
-        close_len = 24,
+        close_len = 36,
         period_len = 0,
-        pred_len = 3,
+        pred_len = 6,
         
         # model trainer
         max_epochs = 1000,
@@ -71,6 +71,7 @@ if __name__ == "__main__":
     # )
 
     dm = MilanFG(
+        tele_column='callin',
         format='timeF',
         batch_size=p['batch_size'], 
         close_len=p['close_len'], 
@@ -95,7 +96,7 @@ if __name__ == "__main__":
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
     )
     trainer.logger.experiment.save('models/ViT.py')
-    trainer.logger.experiment.save('models/ViT_pyramid.py')
+    trainer.logger.experiment.save('models/ViT_matrix.py')
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)

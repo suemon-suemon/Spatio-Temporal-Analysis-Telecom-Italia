@@ -37,7 +37,7 @@ class MilanSW(Milan):
         Milan.setup(self, stage)
 
     def train_dataloader(self):
-        return DataLoader(self._get_dataset(self.milan_train, 'train'), batch_size=self.batch_size, shuffle=False, num_workers=32)
+        return DataLoader(self._get_dataset(self.milan_train, 'train'), batch_size=self.batch_size, shuffle=False, num_workers=16)
 
     def val_dataloader(self):
         return DataLoader(self._get_dataset(self.milan_val, 'val'), batch_size=self.batch_size, shuffle=False, num_workers=8)
@@ -205,7 +205,7 @@ class MilanSWStTranDataset(Dataset):
         self.grid_topk = None
 
     def __len__(self):
-         return (self.milan_data.shape[0] - self.in_len) * self.milan_data.shape[1] * self.milan_data.shape[2]
+         return (self.milan_data.shape[0]-self.in_len-self.out_len+1) * self.milan_data.shape[1] * self.milan_data.shape[2]
     
     def __getitem__(self, index):
         n_slice = index // (self.milan_data.shape[1] * self.milan_data.shape[2])

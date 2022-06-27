@@ -43,14 +43,17 @@ class MilanFG(Milan):
     def _get_dataset(self, data, stage):
         if self.format == 'default':
             return MilanFullGridDataset(data, self.aggr_time, self.close_len, 
-                                            self.period_len, self.trend_len, self.out_len)
+                                            self.period_len, self.trend_len, self.pred_len)
         elif self.format == 'informer':
             return MilanFGInformerDataset(data, self.milan_timestamps[stage], self.aggr_time, self.close_len, 
-                                            self.period_len, self.trend_len, self.label_len, self.out_len)
+                                            self.period_len, self.trend_len, self.label_len, self.pred_len)
         elif self.format == 'sttran':
-            return MilanFGStTranDataset(data, self.aggr_time, self.close_len, self.period_len, self.out_len)
+            return MilanFGStTranDataset(data, self.aggr_time, self.close_len, self.period_len, self.pred_len)
         elif self.format == 'stgcn':
-            return MilanFGStgcnDataset(data, self.aggr_time, self.close_len, self.period_len, self.trend_len, self.out_len)
+            return MilanFGStgcnDataset(data, self.aggr_time, self.close_len, self.period_len, self.trend_len, self.pred_len)
+        elif self.format == 'timeF':
+            return MilanFGTimeFDataset(data, self.milan_timestamps[stage], self.aggr_time, self.close_len, self.period_len, self.trend_len, self.pred_len)
+
 
 class MilanFullGridDataset(Dataset):
     def __init__(self,
@@ -59,7 +62,7 @@ class MilanFullGridDataset(Dataset):
                  close_len: int = 12,
                  period_len: int = 0,
                  trend_len: int = 0,
-                 out_len: int = 1):
+                 pred_len: int = 1):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
         if aggr_time not in [None, 'hour']:
             raise ValueError("aggre_time must be None or 'hour'")
@@ -69,10 +72,10 @@ class MilanFullGridDataset(Dataset):
         self.period_len = period_len
         self.trend_len = trend_len
         self.in_len = close_len
-        self.out_len = out_len
+        self.pred_len = pred_len
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.out_len
+        return len(self.milan_data)+1 - self.in_len - self.pred_len
     
     def __getitem__(self, idx):
         out_start_idx = idx + self.in_len
@@ -84,7 +87,7 @@ class MilanFullGridDataset(Dataset):
         X = np.stack(X, axis=0).astype(np.float32)
         X = X.reshape((1, X.shape[0], X.shape[1], X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
 
-        Y = self.milan_data[out_start_idx: out_start_idx+self.out_len].squeeze()
+        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len].squeeze()
         return X, Y
 
 
@@ -97,7 +100,7 @@ class MilanFGInformerDataset(Dataset):
                  period_len: int = 0,
                  trend_len: int = 0,
                  label_len: int = 12,
-                 out_len: int = 1):
+                 pred_len: int = 1):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
         if aggr_time not in [None, 'hour']:
             raise ValueError("aggre_time must be None or 'hour'")
@@ -110,10 +113,10 @@ class MilanFGInformerDataset(Dataset):
         self.trend_len = trend_len
         self.in_len = close_len
         self.label_len = label_len
-        self.out_len = out_len
+        self.pred_len = pred_len
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.out_len
+        return len(self.milan_data)+1 - self.in_len - self.pred_len
     
     def __getitem__(self, idx):
         out_start_idx = idx + self.in_len
@@ -124,15 +127,57 @@ class MilanFGInformerDataset(Dataset):
         X = np.stack(X, axis=0)
         X = X.reshape((X.shape[0], X.shape[1] * X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
 
-        Y = self.milan_data[out_start_idx-self.label_len: out_start_idx+self.out_len].squeeze()
+        Y = self.milan_data[out_start_idx-self.label_len: out_start_idx+self.pred_len].squeeze()
         Y = Y.reshape((Y.shape[0], Y.shape[1] * Y.shape[2]))
 
         X_timefeature = [self.timestamps[i] if i >= 0 else np.zeros((self.timestamps.shape[1])) for i in indices]
         X_timefeature = np.stack(X_timefeature, axis=0)
-        Y_timefeature = self.timestamps[out_start_idx-self.label_len: out_start_idx+self.out_len]
+        Y_timefeature = self.timestamps[out_start_idx-self.label_len: out_start_idx+self.pred_len]
 
         return X, Y, X_timefeature, Y_timefeature
     
+
+class MilanFGTimeFDataset(Dataset):
+    def __init__(self,
+                 milan_data,
+                 timestamps,
+                 aggr_time: str,
+                 close_len: int = 12,
+                 period_len: int = 0,
+                 trend_len: int = 0,
+                 pred_len: int = 1):
+        # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
+        if aggr_time not in [None, 'hour']:
+            raise ValueError("aggre_time must be None or 'hour'")
+        self.time_level = aggr_time
+        self.milan_data = milan_data
+        self.close_len = close_len
+        self.period_len = period_len
+        self.trend_len = trend_len
+        self.in_len = close_len
+        self.pred_len = pred_len
+        self.timestamps = time_features(timestamps, timeenc=1, 
+                                freq='h' if self.time_level == 'hour' else 't')
+
+    def __len__(self):
+        return len(self.milan_data)+1 - self.in_len - self.pred_len
+    
+    def __getitem__(self, idx):
+        out_start_idx = idx + self.in_len
+        slice_shape = self.milan_data.shape[1:]
+        indices = get_indexes_of_train('default', self.time_level, out_start_idx, 
+                                        self.close_len, self.period_len, self.trend_len, pred_len=self.pred_len)
+
+        X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        X = np.stack(X, axis=0).astype(np.float32)
+        X = X.reshape((1, X.shape[0], X.shape[1], X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
+        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len].squeeze()
+
+        X_timefeature = [self.timestamps[i] if i >= 0 else np.zeros((self.timestamps.shape[1])) for i in indices]
+        X_timefeature = np.stack(X_timefeature, axis=0)
+       
+        return X, Y, X_timefeature
+
 
 class MilanFGStTranDataset(Dataset):
     def __init__(self,
@@ -140,7 +185,7 @@ class MilanFGStTranDataset(Dataset):
                  aggr_time: str,
                  close_len: int = 3,
                  period_len: int = 3,
-                 out_len: int = 3):
+                 pred_len: int = 3):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
         if aggr_time not in [None, 'hour']:
             raise ValueError("aggre_time must be None or 'hour'")
@@ -149,10 +194,10 @@ class MilanFGStTranDataset(Dataset):
         self.close_len = close_len
         self.period_len = period_len
         self.in_len = close_len
-        self.out_len = out_len
+        self.pred_len = pred_len
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.out_len
+        return len(self.milan_data)+1 - self.in_len - self.pred_len
     
     def __getitem__(self, idx):
         out_start_idx = idx + self.in_len
@@ -162,7 +207,7 @@ class MilanFGStTranDataset(Dataset):
         indices = get_indexes_of_train('sttran', self.time_level, out_start_idx, self.close_len, self.period_len)
         Xp = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         Xp = np.stack(Xp, axis=0).astype(np.float32)
-        Y = self.milan_data[out_start_idx: out_start_idx+self.out_len]
+        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len]
 
         Xc = Xc.reshape((Xc.shape[0], Xc.shape[1] * Xc.shape[2])).transpose(1, 0)
         Xp = Xp.reshape((self.period_len, self.close_len, Xp.shape[1] * Xp.shape[2])).transpose(2, 1, 0)
@@ -177,7 +222,7 @@ class MilanFGStgcnDataset(Dataset):
                  close_len: int = 12,
                  period_len: int = 0,
                  trend_len: int = 0,
-                 out_len: int = 1):
+                 pred_len: int = 1):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
         if aggr_time not in [None, 'hour']:
             raise ValueError("aggre_time must be None or 'hour'")
@@ -187,25 +232,29 @@ class MilanFGStgcnDataset(Dataset):
         self.period_len = period_len
         self.trend_len = trend_len
         self.in_len = close_len
-        self.out_len = out_len
+        self.pred_len = pred_len
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.out_len
+        return len(self.milan_data)+1 - self.in_len - self.pred_len
     
     def __getitem__(self, idx):
         out_start_idx = idx + self.in_len
         slice_shape = self.milan_data.shape[1:]
         indices = get_indexes_of_train('default', self.time_level, out_start_idx, 
                                         self.close_len, self.period_len, self.trend_len)
-
+        indices.reverse()
+        
         X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         X = np.stack(X, axis=0).astype(np.float32)
         X = X.reshape((X.shape[0], 1, X.shape[1] * X.shape[2])) # (n_timestamps, n_features, n_grid_row, n_grid_col)))
-        Y = self.milan_data[out_start_idx: out_start_idx+self.out_len].squeeze()
+        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len]
 
         Xc = X[:self.close_len].transpose(2, 1, 0)
         if self.period_len == 0 and self.trend_len == 0:
             return [Xc], Y
+        elif self.trend_len == 0:
+            Xp = X[self.close_len: self.close_len+self.period_len].transpose(2, 1, 0)
+            return [Xc, Xp], Y
         else:
             Xp = X[self.close_len: self.close_len+self.period_len].transpose(2, 1, 0)
             Xt = X[self.close_len+self.period_len: self.close_len+self.period_len+self.trend_len].transpose(2, 1, 0)

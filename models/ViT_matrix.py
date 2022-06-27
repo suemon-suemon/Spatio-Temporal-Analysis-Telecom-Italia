@@ -249,7 +249,7 @@ class ViT_matrix(STBase):
         x = x.squeeze(1)
         res = repeat(torch.mean(x[:, -1:], dim=1), 'b h w -> b s h w', s=self.pred_len)
         
-        convf = self.conv3d_features(x)
+        convf = self.conv_features(x)
         src = self.to_patch_embedding(convf)
         # b, n, _ = x.shape
         # cls_tokens = repeat(self.cls_token, '1 n d -> b n d', b = b)

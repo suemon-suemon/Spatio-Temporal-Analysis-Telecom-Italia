@@ -14,7 +14,7 @@ class Milan(LightningDataModule):
                  data_dir: str = 'data/sms-call-internet-mi',
                  grid_range: tuple = (41, 70, 41, 70),
                  aggr_time: str = None,
-                 out_len: int = 1,
+                 pred_len: int = 1,
                  batch_size: int = 64,
                  normalize: bool = False,
                  max_norm: float = 1.,
@@ -26,7 +26,7 @@ class Milan(LightningDataModule):
             raise ValueError("aggre_time must be None or 'hour'")
         self.aggr_time = aggr_time
 
-        if tele_column not in ['internet', 'mobile']:
+        if tele_column not in ['internet', 'mobile', 'callin', 'callout', 'smsin', 'smsout']:
             raise ValueError('tele_column must be one of internet, mobile')
         self.tele_column = tele_column
 
@@ -38,6 +38,7 @@ class Milan(LightningDataModule):
         self.file_name = "milan_{}_{}_data.csv.gz".format(tele_column, time_range)
         self.val_split_date = self.get_default_split_date(time_range)['val']
         self.test_split_date = self.get_default_split_date(time_range)['test']
+        self.end_date = self.get_default_split_date(time_range)['end']
 
         self.grid_range = grid_range # (min_row, max_row, min_col, max_col)
         self.n_rows = grid_range[1] - grid_range[0] + 1
@@ -49,18 +50,18 @@ class Milan(LightningDataModule):
         self.max_norm = max_norm
         self.scaler = None
         self.batch_size = batch_size
-        self.out_len = out_len
+        self.pred_len = pred_len
 
         self.milan_train = None
         self.milan_val = None
         self.milan_test = None
 
     @staticmethod
-    def train_test_split(data: np.ndarray, train_len: int, val_len: int=None, is_val=True) -> tuple:
+    def train_test_split(data: np.ndarray, train_len: int, val_len: int=None, test_len: int=None, is_val=True) -> tuple:
         train = data[:train_len, :]
         if is_val:
             val = data[train_len:train_len+val_len, :]
-            test = data[train_len+val_len:, :]
+            test = data[train_len+val_len:train_len+val_len+test_len, :]
             return train, val, test
         else:
             test = data[train_len:, :]
@@ -71,10 +72,12 @@ class Milan(LightningDataModule):
         # return val and test split date
         if time_range == '30days':
             return {'val': {'year': 2013, 'month': 11, 'day': 18}, 
-                    'test': {'year': 2013, 'month': 11, 'day': 21}}
+                    'test': {'year': 2013, 'month': 11, 'day': 21},
+                    'end': {'year': 2013, 'month': 12, 'day': 1}}
         else:
-            return {'val': {'year': 2013, 'month': 12, 'day': 18}, 
-                    'test': {'year': 2013, 'month': 12, 'day': 22}}
+            return {'val': {'year': 2013, 'month': 12, 'day': 18},  # 10 | 18 
+                    'test': {'year': 2013, 'month': 12, 'day': 22}, # 14 | 22
+                    'end': {'year': 2014, 'month': 1, 'day': 1}}  # 24 |  1
 
     @staticmethod
     def _load_telecom_data(path):
@@ -86,7 +89,7 @@ class Milan(LightningDataModule):
 
     def prepare_data(self):
         if not os.path.exists(os.path.join(self.data_dir, self.file_name)):
-            raise FileNotFoundError("{} not found".format(self.file_name))
+            # raise FileNotFoundError("{} not found".format(self.file_name))
             start_date = 1
             end_date = 30
             if end_date >= 10:
@@ -104,7 +107,7 @@ class Milan(LightningDataModule):
                 data = pd.concat([data, self._load_telecom_data(path)], ignore_index=True)
             data = data.sort_values(['cellid', 'time']).reset_index(drop=True)
             print("loaded {} rows".format(len(data)))
-            if self.tele_column == 'internet':
+            if self.tele_column in ['internet', 'callin', 'callout', 'smsin', 'smsout']:
                 data = data[['cellid', 'time', self.tele_column]]
             elif self.tele_column == 'mobile':
                 data['mobile'] = data['smsin'] + data['smsout'] + data['callin'] + data['callout'] + data['internet']
@@ -118,13 +121,13 @@ class Milan(LightningDataModule):
             raise FileNotFoundError('{} not found in {}'.format(self.file_name, self.data_dir))
         # Assign train/val datasets for use in dataloaders
         if stage == "fit" or stage is None:
-            train_len, val_len = self._load_data()
+            train_len, val_len, test_len = self._load_data()
             self.milan_timestamps = {
                 "train": self.milan_df['time'].iloc[:train_len],
                 "val": self.milan_df['time'].iloc[train_len:train_len+val_len],
-                "test": self.milan_df['time'].iloc[train_len+val_len:],
+                "test": self.milan_df['time'].iloc[train_len+val_len:train_len+val_len+test_len],
             }
-            milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len)
+            milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len, test_len)
             self.milan_train = milan_train.reshape(-1, self.n_rows, self.n_cols)
             self.milan_val = milan_val.reshape(-1, self.n_rows, self.n_cols)
             self.milan_test = milan_test.reshape(-1, self.n_rows, self.n_cols)
@@ -132,13 +135,13 @@ class Milan(LightningDataModule):
         # Assign test dataset for use in dataloader(s)
         if stage in ["test", "predict"] or stage is None:
             if self.milan_test is None:
-                train_len, val_len = self._load_data()
+                train_len, val_len, test_len = self._load_data()
                 self.milan_timestamps = {
                     "train": self.milan_df['time'].iloc[:train_len],
                     "val": self.milan_df['time'].iloc[train_len:train_len+val_len],
-                    "test": self.milan_df['time'].iloc[train_len+val_len:],
+                    "test": self.milan_df['time'].iloc[train_len+val_len:train_len+val_len+test_len],
                 }
-                milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len)
+                milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len, test_len)
                 self.milan_test = milan_test.reshape(-1, self.n_rows, self.n_cols)
                 print('test shape: {}'.format(self.milan_test.shape))
 
@@ -178,7 +181,10 @@ class Milan(LightningDataModule):
             **self.val_split_date)].unique().shape[0]
         val_len = self.milan_df['time'][(self.milan_df['time'] >= pd.Timestamp(
             **self.val_split_date)) & (self.milan_df['time'] < pd.Timestamp(**self.test_split_date))].unique().shape[0]
-        return train_len, val_len
+        test_len = self.milan_df['time'][(self.milan_df['time'] >= pd.Timestamp(
+            **self.test_split_date)) & (self.milan_df['time'] < pd.Timestamp(**self.end_date))].unique().shape[0]
+
+        return train_len, val_len, test_len
 
     def train_dataloader(self):
         raise NotImplementedError
