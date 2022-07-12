@@ -17,8 +17,9 @@ if __name__ == "__main__":
         # dataset
         time_range = 'all',
         aggr_time = 'hour',
-        batch_size = 512,
-        learning_rate = 1e-3,
+        tele_col = 'internet',
+        batch_size = 1024,
+        learning_rate = 1e-4,
         normalize = True,
         
         # model trainer
@@ -41,17 +42,19 @@ if __name__ == "__main__":
     )
 
     dm = MilanSW(
+        tele_column = p['tele_col'],
         format = 'sttran',
         batch_size=p['batch_size'],
         close_len=p['close_len'], 
         period_len=p['period_len'], 
-        out_len = p['pred_len'],
+        pred_len = p['pred_len'],
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
         normalize=p['normalize'],
     )
     
-    wandb_logger = WandbLogger(name='stTran_in3_pred1_min', project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(project="spatio-temporal prediction",
+        name=f"stTran_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}")
     wandb_logger.experiment.config["exp_tag"] = "StTran"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -61,9 +64,10 @@ if __name__ == "__main__":
         check_val_every_n_epoch=1,
         logger=wandb_logger,
         gpus=1,
-        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=5)]
+        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
     )
 
+    # model = STTran.load_from_checkpoint('spatio-temporal prediction/vz5epxxk/checkpoints/epoch=163-step=165640.ckpt')
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
-    trainer.predict(model, datamodule=dm)
+    # trainer.predict(model, datamodule=dm)

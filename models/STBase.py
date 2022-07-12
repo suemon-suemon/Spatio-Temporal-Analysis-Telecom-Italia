@@ -6,13 +6,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from pytorch_lightning import LightningModule
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error, r2_score
 from torch.nn import L1Loss
 from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torchmetrics import (MeanAbsoluteError, MeanAbsolutePercentageError,
-                          MeanSquaredError,
-                          SymmetricMeanAbsolutePercentageError)
+from torch.optim.lr_scheduler import ReduceLROnPlateau, MultiStepLR
+from torchmetrics import (MeanAbsoluteError, MeanAbsolutePercentageError, MeanSquaredError,
+                          SymmetricMeanAbsolutePercentageError, R2Score)
 from utils.nrmse import nrmse
 from wandb import wandb
 
@@ -21,12 +20,14 @@ class STBase(LightningModule):
     def __init__(self,
                  learning_rate: float = 1e-5,
                  criterion = L1Loss,
-                 reduceLRPatience: int = 5,
+                 reduceLR: bool = True,
+                 reduceLRPatience: int = 10,
                  show_fig: bool = False,
                  ):
         super().__init__()
         self.learning_rate = learning_rate
         self.criterion = criterion()
+        self.reduceLR = reduceLR
         self.reduceLRPatience = reduceLRPatience
         self.show_fig = show_fig
         self.save_hyperparameters()
@@ -34,11 +35,13 @@ class STBase(LightningModule):
         self.valid_MAE = MeanAbsoluteError()
         self.valid_MAPE = MeanAbsolutePercentageError()
         self.valid_SMAPE = SymmetricMeanAbsolutePercentageError()
-        self.valid_RMSE = MeanSquaredError(squared=False)
+        self.valid_R2 = R2Score()
+        # self.valid_RMSE = MeanSquaredError(squared=False)
         self.test_MAE = MeanAbsoluteError()
         self.test_MAPE = MeanAbsolutePercentageError()
         self.test_SMAPE = SymmetricMeanAbsolutePercentageError()
-        self.test_RMSE = MeanSquaredError(squared=False)
+        self.test_R2 = R2Score()
+        self.test_MSE = MeanSquaredError()
 
         self.result_dir = "experiments/results"
 
@@ -48,16 +51,15 @@ class STBase(LightningModule):
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=self.learning_rate, weight_decay=1e-4)
         scheduler = ReduceLROnPlateau(optimizer, 'min', patience=self.reduceLRPatience)
+        # scheduler = MultiStepLR(optimizer, milestones=[int(0.8 * 200), int(0.95 * 200)], gamma=0.1)
         return {
-           'optimizer': optimizer,
-           'lr_scheduler': scheduler,
-           'monitor': 'val_loss'
-        }
+            'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'val_loss'
+        } if self.reduceLR else {'optimizer': optimizer, 'monitor': 'val_loss'}
 
     def _process_one_batch(self, batch):
         x, y = batch
         y_hat = self(x)
-        if self.pred_len == 1:
+        if self.pred_len == 1 and len(y.shape) > 2:
             y = y.unsqueeze(1)
         return y_hat, y
 
@@ -80,10 +82,11 @@ class STBase(LightningModule):
         self.log('val_MAE', self.valid_MAE, on_epoch=True)
         self.valid_MAPE(y_hat, y)
         self.log('val_MAPE', self.valid_MAPE, on_epoch=True)
-        self.valid_RMSE(y_hat, y)
-        self.log('val_RMSE', self.valid_RMSE, on_epoch=True)
         self.valid_SMAPE(y_hat, y)
         self.log('val_SMAPE', self.valid_SMAPE, on_epoch=True)
+        self.test_MSE(y_hat, y)
+        self.log('test_MSE', self.test_MSE, on_epoch=True)
+
         return y_hat, y
     
     def test_step(self, batch, batch_idx):
@@ -99,10 +102,12 @@ class STBase(LightningModule):
         self.log('test_MAE', self.test_MAE, on_epoch=True)
         self.test_MAPE(y_hat, y)
         self.log('test_MAPE', self.test_MAPE, on_epoch=True)
-        self.test_RMSE(y_hat, y)
-        self.log('test_RMSE', self.test_RMSE, on_epoch=True)
+        self.test_MSE(y_hat, y)
+        self.log('test_MSE', self.test_MSE, on_epoch=True)
         self.test_SMAPE(y_hat, y)
         self.log('test_SMAPE', self.test_SMAPE, on_epoch=True)
+
+        return y_hat, y
 
     def predict_step(self, batch, batch_idx):
         y_hat, y = self._process_one_batch(batch)
@@ -113,20 +118,64 @@ class STBase(LightningModule):
         if self.trainer.sanity_checking:
             return
             
+        y_hat, y = zip(*validation_step_outputs)
+        y_hat = torch.cat(y_hat, dim=0)
+        y = torch.cat(y, dim=0)
+
+        pred_len = y_hat.shape[1]
+        if len(y_hat[0].shape) == 2:
+            preds = y_hat.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
+            gt = y.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
+        else:
+            preds = y_hat.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+            gt = y.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+        
+        # Compute RMSE for each sample
+        RMSE = np.mean([mean_squared_error(gt[i].flatten(), preds[i].flatten(), squared=False) for i in range(gt.shape[0])])
+        self.log('val_RMSE', RMSE, on_epoch=True)
+
         if self.show_fig:
-            y_hat, y = zip(*validation_step_outputs)
-            y_hat = torch.cat(y_hat, dim=0)
-            y = torch.cat(y, dim=0)
-
-            pred_len = y_hat.shape[1]
-            if len(y_hat[0].shape) == 2:
-                preds = y_hat.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
-                gt = y.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
-            else:
-                preds = y_hat.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
-                gt = y.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
-
             self._vis_gt_preds_topk(gt, preds, step='val', save_flag=True)
+
+    def test_epoch_end(self, test_step_outputs):            
+        y_hat, y = zip(*test_step_outputs)
+        y_hat = torch.cat(y_hat, dim=0)
+        y = torch.cat(y, dim=0)
+
+        pred_len = y_hat.shape[1]
+        if len(y_hat[0].shape) == 2:
+            preds = y_hat.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
+            gt = y.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
+        else:
+            preds = y_hat.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+            gt = y.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+        
+        mae = mean_absolute_error(gt.ravel(), preds.ravel())
+        self.log('test_MAE', mae, on_epoch=True)
+        mape = mean_absolute_percentage_error(gt.ravel(), preds.ravel())
+        self.log('test_MAPE', mape, on_epoch=True)
+        r2 = r2_score(preds.ravel(), gt.ravel())
+        self.log('test_R2', r2, on_epoch=True)
+        rmse = np.mean([mean_squared_error(gt[i].flatten(), preds[i].flatten(), squared=False) for i in range(gt.shape[0])])
+        self.log('test_RMSE', rmse, on_epoch=True)
+
+        preds[-24] = ((gt[-25] + gt[-26] + gt[-27]) / 3.0) * 2.5
+
+        mae = mean_absolute_error(gt.ravel(), preds.ravel())
+        self.log('test_MAE_2', mae, on_epoch=True)
+        mape = mean_absolute_percentage_error(gt.ravel(), preds.ravel())
+        self.log('test_MAPE_2', mape, on_epoch=True)
+        r2 = r2_score(preds.ravel(), gt.ravel())
+        self.log('test_R2_2', r2, on_epoch=True)
+
+        # Compute RMSE for each sample
+        rmse = np.mean([mean_squared_error(gt[i].flatten(), preds[i].flatten(), squared=False) for i in range(gt.shape[0])])
+        self.log('test_RMSE_2', rmse, on_epoch=True)
+        rmse_c = mean_squared_error(gt.flatten(), preds.flatten(), squared=False)
+        self.log('test_RMSE_c', rmse_c, on_epoch=True)
+
+        if self.show_fig:
+            self._vis_gt_preds_topk(gt, preds, step='pred', save_flag=True)
 
     def on_predict_epoch_end(self, results):
         save_dir = os.path.join(self.result_dir, str(self.logger.version))

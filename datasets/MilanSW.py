@@ -15,7 +15,7 @@ class MilanSW(Milan):
                  close_len: int = 3,
                  period_len: int = 3,
                  label_len: int = 12,
-                 out_len: int = 1,
+                 pred_len: int = 1,
                  window_size: int = 11,
                  flatten: bool = True,
                  **kwargs):
@@ -26,7 +26,7 @@ class MilanSW(Milan):
         self.close_len = close_len
         self.period_len = period_len
         self.label_len = label_len
-        self.out_len = out_len
+        self.pred_len = pred_len
         self.flatten = flatten
         self.window_size = window_size
 
@@ -49,18 +49,18 @@ class MilanSW(Milan):
         return self.test_dataloader()
 
     def _get_dataset(self, data, stage):
-        if self.format == 'default':
-            dataset = MilanSlidingWindowDataset(data, input_len=self.close_len, window_size=self.window_size, flatten=self.flatten)
-        elif self.format =='informer':
+        if self.format =='informer':
             dataset =  MilanSWInformerDataset(data, self.milan_timestamps[stage],  
                                           aggr_time=self.aggr_time, input_len=self.close_len, 
                                           window_size=self.window_size, label_len=self.label_len)
         elif self.format == 'sttran':
             dataset =  MilanSWStTranDataset(data, self.aggr_time, self.close_len, 
-                                        self.period_len, self.out_len)
+                                        self.period_len, self.pred_len)
         elif self.format == '3comp':
             dataset =  MilanSW3CompDataset(data, self.aggr_time, self.close_len, 
                                        self.period_len, window_size=self.window_size, flatten=self.flatten)
+        else: # default
+            dataset = MilanSlidingWindowDataset(data, input_len=self.close_len, window_size=self.window_size, pred_len=self.pred_len, flatten=self.flatten)
         # print(f'{stage} dataset length: {len(dataset)}')
         return dataset
 class MilanSlidingWindowDataset(Dataset):
@@ -68,12 +68,14 @@ class MilanSlidingWindowDataset(Dataset):
                  milan_data: pd.DataFrame,
                  window_size: int = 11,
                  input_len: int = 12,
+                 pred_len: int = 1,
                  flatten: bool = True,):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
         self.milan_data = milan_data
         self.window_size = window_size
         self.input_len = input_len
         self.flatten = flatten
+        self.pred_len = pred_len
         pad_size = window_size // 2
         self.milan_data_pad = np.pad(self.milan_data,
                                      ((0, 0), (pad_size, pad_size),
@@ -81,7 +83,7 @@ class MilanSlidingWindowDataset(Dataset):
                                      'constant', constant_values=0)
 
     def __len__(self):
-        return (self.milan_data.shape[0] - self.input_len) * self.milan_data.shape[1] * self.milan_data.shape[2]
+        return (self.milan_data.shape[0]-self.input_len-self.pred_len+1) * self.milan_data.shape[1] * self.milan_data.shape[2]
 
     def __getitem__(self, index):
         n_slice = index // (self.milan_data.shape[1] * self.milan_data.shape[2])
@@ -94,7 +96,7 @@ class MilanSlidingWindowDataset(Dataset):
                                 n_col:n_col+self.window_size]
         if self.flatten:
             X = X.reshape((self.input_len, self.window_size * self.window_size))
-        return (X, self.milan_data[n_slice+self.input_len, n_row, n_col].reshape(-1))
+        return (X, self.milan_data[n_slice+self.input_len:n_slice+self.input_len+self.pred_len, n_row, n_col].reshape(-1))
 
 
 class MilanSW3CompDataset(Dataset):
@@ -112,7 +114,7 @@ class MilanSW3CompDataset(Dataset):
         self.period_len = period_len
         self.in_len = close_len
         self.flatten = flatten
-        self.out_len = 1
+        self.pred_len = 1
         self.window_size = window_size
         pad_size = window_size // 2
         self.milan_data_pad = np.pad(self.milan_data,
@@ -138,7 +140,7 @@ class MilanSW3CompDataset(Dataset):
         X = np.array([idx_grid_data[i] if i >= 0 else np.zeros(spatial_window) for i in indices], dtype=np.float32)
         if self.flatten:
             X = X.reshape((-1, spatial_window[0] * spatial_window[1]))
-        Y = self.milan_data[out_start_idx: out_start_idx+self.out_len, n_row, n_col]
+        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len, n_row, n_col]
         return (X, Y)
 
 
@@ -188,7 +190,7 @@ class MilanSWStTranDataset(Dataset):
                  aggr_time: str,
                  close_len: int = 3,
                  period_len: int = 3,
-                 out_len: int = 3,
+                 pred_len: int = 3,
                  K_grids = 20):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
         if aggr_time not in [None, 'hour']:
@@ -198,14 +200,14 @@ class MilanSWStTranDataset(Dataset):
         self.close_len = close_len
         self.period_len = period_len
         self.in_len = close_len
-        self.out_len = out_len
+        self.pred_len = pred_len
         self.K_grids = K_grids
 
         self.curr_slice = -1
         self.grid_topk = None
 
     def __len__(self):
-         return (self.milan_data.shape[0]-self.in_len-self.out_len+1) * self.milan_data.shape[1] * self.milan_data.shape[2]
+         return (self.milan_data.shape[0]-self.in_len-self.pred_len+1) * self.milan_data.shape[1] * self.milan_data.shape[2]
     
     def __getitem__(self, index):
         n_slice = index // (self.milan_data.shape[1] * self.milan_data.shape[2])
@@ -235,7 +237,7 @@ class MilanSWStTranDataset(Dataset):
         Xp = [idx_grid_data[i] if i >= 0 else 0 for i in indices]
         Xp = np.stack(Xp, axis=0).astype(np.float32)
         Xp = Xp.reshape((self.period_len, self.close_len))
-        Y = idx_grid_data[out_start_idx: out_start_idx+self.out_len]
+        Y = idx_grid_data[out_start_idx: out_start_idx+self.pred_len]
 
         return Xc, Xp, Xs, Y # (c,), (p, c), (K, c), (c,)
 

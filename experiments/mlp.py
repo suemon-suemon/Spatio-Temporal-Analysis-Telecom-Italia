@@ -16,8 +16,9 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = 'all',
-        aggr_time = 'hour',
+        time_range = '30days',
+        aggr_time = None,
+        tele_col = 'callout',
         batch_size = 64,
         learning_rate = 1e-4,
         normalize = False,
@@ -40,6 +41,7 @@ if __name__ == "__main__":
     )
 
     dm = MilanFG(
+        tele_column=p['tele_col'],
         batch_size=p['batch_size'], 
         close_len=p['close_len'], 
         period_len=p['period_len'],
@@ -49,7 +51,7 @@ if __name__ == "__main__":
         pred_len=p['pred_len'],
     )
 
-    wandb_logger = WandbLogger(name=f"MLP2_HI_{'hr' if p['aggr_time']=='hour' else 'min'}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}", 
+    wandb_logger = WandbLogger(name=f"MLP_{'hr' if p['aggr_time']=='hour' else 'min'}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}_{p['tele_col']}", 
                                project="spatio-temporal prediction")
     wandb_logger.experiment.config["exp_tag"] = "MLP"
     wandb_logger.experiment.config.update(p, allow_val_change=True)

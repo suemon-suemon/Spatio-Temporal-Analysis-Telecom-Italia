@@ -17,17 +17,20 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        aggr_time = None,
         time_range = '30days',
+        aggr_time = None,
+        tele_col = 'internet',
+
         normalize = True,
-        batch_size = 64,
+        batch_size = 32,
         learning_rate = 1e-3,
 
-        max_epochs = 500,
+        max_epochs = 100,
         criterion = nn.L1Loss,
         close_len = 3,
         period_len = 3,
-        trend_len = 3,
+        trend_len = 0,
+        pred_len = 1,
     )
 
     dm = MilanFG(
@@ -35,29 +38,34 @@ if __name__ == "__main__":
         close_len=p['close_len'], 
         period_len=p['period_len'], 
         trend_len=p['trend_len'],
+        pred_len=p['pred_len'],
         normalize=p['normalize'],
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
+        tele_column=p['tele_col'],
     )
     model = STDenseNet(
         learning_rate = p['learning_rate'],
         channels = [p['close_len'], p['period_len'], p['trend_len']],
     )
 
-    wandb_logger = WandbLogger(project="spatio-temporal prediction")
-    wandb_logger.experiment.config["exp_tag"] = "stDenseNet"
-    wandb_logger.experiment.config.update(p)
+    # wandb_logger = WandbLogger(project="spatio-temporal prediction",
+    #     name=f"STDense_in{p['close_len']}_out{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}")
+    # wandb_logger.experiment.config["exp_tag"] = "stDenseNet"
+    # wandb_logger.experiment.config.update(p)
     lr_monitor = LearningRateMonitor(logging_interval='step')
     trainer = Trainer(
         log_every_n_steps=1,
         check_val_every_n_epoch=1,
         max_epochs=p['max_epochs'],
-        logger=wandb_logger,
+        # logger=wandb_logger,
         gpus=1,
-        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=50, verbose=True)]
+        callbacks=[lr_monitor, 
+                    # EarlyStopping(monitor='val_loss', patience=100, verbose=True)
+                    ]
     )    
-    trainer.logger.experiment.save('models/STDenseNet.py')
+    # trainer.logger.experiment.save('models/STDenseNet.py')
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
-    trainer.predict(model, datamodule=dm)
+    # trainer.predict(model, datamodule=dm)

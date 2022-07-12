@@ -18,7 +18,8 @@ if __name__ == "__main__":
         # dataset
         time_range = '30days',
         aggr_time = None,
-        batch_size = 1024,
+        tele_col = 'internet',
+        batch_size = 512,
         learning_rate = 1e-4,
         normalize = False,
         
@@ -30,7 +31,7 @@ if __name__ == "__main__":
         seq_len = 12,
     )
 
-    model = STN_3dConv(
+    model = STN(
         x_dim = p['x_dim'],
         y_dim = p['y_dim'],
         seq_len = p['seq_len'],
@@ -38,15 +39,17 @@ if __name__ == "__main__":
     )
 
     dm = MilanSW(
+        tele_column = p['tele_col'],
         batch_size=p['batch_size'], 
-        in_len=p['seq_len'], 
+        close_len=p['seq_len'], 
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
         normalize=p['normalize'],
         flatten=False,
     )
 
-    wandb_logger = WandbLogger(name='3d-conv-bias-64fc', project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(project="spatio-temporal prediction",
+        name=f"stn_in{p['seq_len']}_out1_{'hr' if p['aggr_time']=='hour' else 'min'}_{p['time_range']}")
     wandb_logger.experiment.config["exp_tag"] = "STN"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -60,4 +63,4 @@ if __name__ == "__main__":
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
-    trainer.predict(model, datamodule=dm)
+    # trainer.predict(model, datamodule=dm)

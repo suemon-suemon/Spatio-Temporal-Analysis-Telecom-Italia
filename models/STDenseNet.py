@@ -3,8 +3,6 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch_lightning import LightningModule
-from torch.nn import L1Loss
 
 from models.STBase import STBase
 
@@ -78,19 +76,18 @@ class DenseNetUnit(nn.Sequential):
 
     def forward(self, x):
         out = self.features(x)
-        out = out.squeeze()
         return out
 
 
 class STDenseNet(STBase):
     def __init__(self, 
                  channels: list=[3,3,0],
-                 grid_size = (30, 30),
+                 pred_len: int=1,
                  **kwargs):
         """
         :param list channels: define channels of different Unit, a list of [close, peoriod, trend], defaults to [3,3,0]
         """
-        kwargs['reduceLRPatience'] = 10
+        kwargs['reduceLRPatience'] = 20
         super(STDenseNet, self).__init__(**kwargs)
         if len(channels) != 3:
             raise ValueError("The length of channels should be 3.")
@@ -98,28 +95,25 @@ class STDenseNet(STBase):
         self.channels_period = channels[1]
         self.channels_trend = channels[2]
         self.seq_len = self.channels_close
+        self.pred_len = pred_len
         self.save_hyperparameters()
 
-        self.feature_close = DenseNetUnit(self.channels_close, 1)
-        n_comp = 1
+        self.close_feature = DenseNetUnit(self.channels_close, 1)
         if self.channels_period > 0:
-            self.feature_period = DenseNetUnit(self.channels_period, 1)
-            n_comp += 1
+            self.period_feature = DenseNetUnit(self.channels_period, 1)
         if self.channels_trend > 0:
-            self.feature_trend = DenseNetUnit(self.channels_trend, 1)
-            n_comp += 1
-        self.fusion_weights = nn.Parameter(torch.Tensor(n_comp, *grid_size))
+            self.trend_feature = DenseNetUnit(self.channels_trend, 1)
 
     def forward(self, x):
         x = x.squeeze() 
         xc = x[:, 0:self.channels_close, :, :]
         xp = x[:, self.channels_close:self.channels_close+self.channels_period, :, :]
         xt = x[:, self.channels_close+self.channels_period:self.channels_close+self.channels_period+self.channels_trend, :, :]
-        out = self.feature_close(xc)
+        out = 0
+        if self.channels_close > 0:
+            out += self.close_feature(xc)
         if self.channels_period > 0:
-            out = torch.stack((out, self.feature_period(xp)), dim=1)
+            out += self.period_feature(xp)
         if self.channels_trend > 0:
-            out = torch.stack((out, self.feature_trend(xt)), dim=1)
-        if len(out.shape) == 3:
-            out = out.unsqueeze(1)
-        return torch.sigmoid(torch.sum(self.fusion_weights * out, dim=1))
+            out += self.trend_feature(xt)
+        return torch.sigmoid(out)

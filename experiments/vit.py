@@ -5,7 +5,7 @@ fix_python_path_if_working_locally()
 from datasets import MilanSW, MilanFG
 from models import ViT, ViT_matrix
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
 from torch import nn
@@ -16,33 +16,45 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = '30days',
-        aggr_time = None,
+        time_range = 'all',
+        aggr_time = 'hour',
+        tele_col = 'sms',
         # data_format = '3comp',
-        batch_size = 16,
+        batch_size = 32,
         learning_rate = 1e-4,
         normalize = False,
 
-        close_len = 36,
+        close_len = 12,
         period_len = 0,
-        pred_len = 6,
+        pred_len = 1,
         
         # model trainer
-        max_epochs = 1000,
+        max_epochs = 200,
         criterion = nn.L1Loss,
         # spatial_window = 11,
-        patch_size = (3, 3),
-        stride_size = (3, 3),
+        patch_size = (2, 2),
+        stride_size = (2, 2),
         padding_size = (0, 0),
-        vit_dim = 128,
-        vit_heads = 64,
-        vit_depth = 6,
-        mlp_dim = 256,
+        vit_dim = 32,
+        vit_heads = 8,
+        vit_depth = 3,
+        mlp_dim = 512,
+        channels_group = 4,
+        inner_channels = 16,
+        d_decoder = 256,
+        conv_channels = 512,
+        dccnn_layers = 5,
+        dccnn_growth_rate = 128,
+        dccnn_init_channels = 64,
+        dropout_rate = 0.3,
         pool = 'cls',
     )
 
     model = ViT_matrix(
-        image_size=(30, 30),
+        reduceLR = False,
+        image_size=(20, 20),
+        criterion=p['criterion'],
+        learning_rate=p['learning_rate'],
         patch_size=p['patch_size'],
         stride_size=p['stride_size'],
         padding_size=p['padding_size'],
@@ -53,9 +65,15 @@ if __name__ == "__main__":
         pred_len=p['pred_len'],
         close_len=p['close_len'],
         period_len=p['period_len'],
-        learning_rate=p['learning_rate'],
         pool=p['pool'],
-        channels_group=p['pred_len'],
+        channels_group=p['channels_group'],
+        conv_channels=p['conv_channels'],
+        dccnn_layers=p['dccnn_layers'],
+        dccnn_growth_rate=p['dccnn_growth_rate'],
+        dccnn_init_channels=p['dccnn_init_channels'],
+        inner_channels=p['inner_channels'],
+        d_decoder=p['d_decoder'],
+        dropout=p['dropout_rate'],
     )
 
     # dm = MilanSW(
@@ -71,7 +89,9 @@ if __name__ == "__main__":
     # )
 
     dm = MilanFG(
-        tele_column='callin',
+        # compare_mvstgn=True,
+        grid_range=(41, 60, 41, 60),
+        tele_column=p['tele_col'],
         format='timeF',
         batch_size=p['batch_size'], 
         close_len=p['close_len'], 
@@ -82,22 +102,26 @@ if __name__ == "__main__":
         pred_len=p['pred_len'],
     )
 
-    wandb_logger = WandbLogger(
-        name=f"vitM_MLP_{'hr' if p['aggr_time']=='hour' else 'min'}(last7)_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}_conv3dFL(c)", 
-        project="spatio-temporal prediction"
-    )
-    wandb_logger.experiment.config["exp_tag"] = "ViT"
-    wandb_logger.experiment.config.update(p, allow_val_change=True)
+    # wandb_logger = WandbLogger(
+    #     name=f"vitM_MLP_{'hr' if p['aggr_time']=='hour' else 'min'}_{p['tele_col']}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}", 
+    #     project="spatio-temporal prediction"
+    # )
+    # wandb_logger.experiment.config["exp_tag"] = "ViT"
+    # wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
+    checkpoint_callback = ModelCheckpoint(save_top_k=1, save_last=True, monitor="val_loss")
     trainer = Trainer(
         max_epochs=p['max_epochs'],
-        logger=wandb_logger,
+        log_every_n_steps=10,
+        # logger=wandb_logger,
         gpus=1,
-        callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
+        callbacks=[lr_monitor, checkpoint_callback, EarlyStopping(patience=35, monitor="val_loss")],
     )
-    trainer.logger.experiment.save('models/ViT.py')
-    trainer.logger.experiment.save('models/ViT_matrix.py')
+    # trainer.logger.experiment.save('models/ViT.py')
+    # trainer.logger.experiment.save('models/ViT_matrix.py')
+    
+    model = ViT_matrix.load_from_checkpoint('lightning_logs/version_218/checkpoints/epoch=59-step=2160.ckpt')
 
-    trainer.fit(model, dm)
+    # trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
-    trainer.predict(model, datamodule=dm)
+    # trainer.predict(model, datamodule=dm)

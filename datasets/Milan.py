@@ -1,18 +1,20 @@
 import os
 from typing import Optional
 
+import h5py
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
-from pytorch_lightning import LightningDataModule
-from utils.milano_grid import gen_cellids_by_colrow
-from networkx.generators import grid_2d_graph
 from networkx import adjacency_matrix
+from networkx.generators import grid_2d_graph
+from pytorch_lightning import LightningDataModule
+from sklearn.preprocessing import MinMaxScaler
+from utils.milano_grid import gen_cellids_by_colrow
+
 
 class Milan(LightningDataModule):
     def __init__(self,
                  data_dir: str = 'data/sms-call-internet-mi',
-                 grid_range: tuple = (41, 70, 41, 70),
+                 grid_range: tuple = (31, 60, 41, 70),
                  aggr_time: str = None,
                  pred_len: int = 1,
                  batch_size: int = 64,
@@ -20,13 +22,16 @@ class Milan(LightningDataModule):
                  max_norm: float = 1.,
                  tele_column: str = 'internet',
                  time_range: str = 'all',
+                 compare_mvstgn: bool = False,
                  ):
         super(Milan, self).__init__()
+        self.compare_mvstgn = compare_mvstgn
+
         if aggr_time not in [None, 'hour']:
             raise ValueError("aggre_time must be None or 'hour'")
         self.aggr_time = aggr_time
 
-        if tele_column not in ['internet', 'mobile', 'callin', 'callout', 'smsin', 'smsout']:
+        if tele_column not in ['internet', 'mobile', 'call', 'callin', 'callout', 'sms', 'smsin', 'smsout']:
             raise ValueError('tele_column must be one of internet, mobile')
         self.tele_column = tele_column
 
@@ -41,8 +46,12 @@ class Milan(LightningDataModule):
         self.end_date = self.get_default_split_date(time_range)['end']
 
         self.grid_range = grid_range # (min_row, max_row, min_col, max_col)
-        self.n_rows = grid_range[1] - grid_range[0] + 1
-        self.n_cols = grid_range[3] - grid_range[2] + 1
+        if grid_range is None:
+            self.grid_range = (1, 100, 1, 100)
+            self.n_rows = self.n_cols = 100
+        else:
+            self.n_rows = grid_range[1] - grid_range[0] + 1
+            self.n_cols = grid_range[3] - grid_range[2] + 1
         self.n_grids = self.n_rows * self.n_cols
         self.adj_mx = adjacency_matrix(grid_2d_graph(self.n_rows, self.n_cols))
 
@@ -75,31 +84,39 @@ class Milan(LightningDataModule):
                     'test': {'year': 2013, 'month': 11, 'day': 21},
                     'end': {'year': 2013, 'month': 12, 'day': 1}}
         else:
-            return {'val': {'year': 2013, 'month': 12, 'day': 18},  # 10 | 18 
-                    'test': {'year': 2013, 'month': 12, 'day': 22}, # 14 | 22
-                    'end': {'year': 2014, 'month': 1, 'day': 1}}  # 24 |  1
+            return {'val': {'year': 2013, 'month': 12, 'day': 19},  # 10 | 13 | 19
+                    'test': {'year': 2013, 'month': 12, 'day': 26}, # 14 | 23 | 26
+                    'end': {'year': 2014, 'month': 1, 'day': 2}}    # 24 |  2 |  2
 
     @staticmethod
     def _load_telecom_data(path):
         print("loading data from file: {}".format(path))
         data = pd.read_csv(path, header=0, index_col=0)
+        # test TODO DEBUG
+        # data = data[data['countrycode'] == 39]
         data = data.groupby(['cellid', 'time'], as_index=False).sum()
         data.drop(['countrycode'], axis=1, inplace=True)
         return data
 
     def prepare_data(self):
+        if self.compare_mvstgn: 
+            return # use data_git_version.h5
+
         if not os.path.exists(os.path.join(self.data_dir, self.file_name)):
             # raise FileNotFoundError("{} not found".format(self.file_name))
-            start_date = 1
-            end_date = 30
-            if end_date >= 10:
-                paths = ['sms-call-internet-mi-2013-11-0{i}.csv'.format(i=i) 
-                         for i in range(start_date, 10)] + \
-                        ['sms-call-internet-mi-2013-11-{i}.csv'.format(i=i) 
-                         for i in range(10, end_date+1)]
-            else:
-                paths = ['sms-call-internet-mi-2013-11-0{i}.csv'.format(i=i) 
-                         for i in range(start_date, end_date+1)]
+            enddate = self.get_default_split_date(self.time_range)['end']
+            # paths = ['sms-call-internet-mi-2013-11-01.csv']
+            paths = ['sms-call-internet-mi-2013-11-0{i}.csv'.format(i=i) 
+                        for i in range(1, 10)] + \
+                    ['sms-call-internet-mi-2013-11-{i}.csv'.format(i=i) 
+                        for i in range(10, 30+1)]
+            if enddate['month'] == 1:
+                paths += ['sms-call-internet-mi-2013-12-0{i}.csv'.format(i=i) 
+                            for i in range(1, 10)] + \
+                        ['sms-call-internet-mi-2013-12-{i}.csv'.format(i=i) 
+                            for i in range(10, 31+1)]
+                paths += ['sms-call-internet-mi-2014-01-01.csv']
+            
             paths = [os.path.join(self.data_dir, path) for path in paths]
 
             data = pd.DataFrame()
@@ -107,16 +124,55 @@ class Milan(LightningDataModule):
                 data = pd.concat([data, self._load_telecom_data(path)], ignore_index=True)
             data = data.sort_values(['cellid', 'time']).reset_index(drop=True)
             print("loaded {} rows".format(len(data)))
-            if self.tele_column in ['internet', 'callin', 'callout', 'smsin', 'smsout']:
-                data = data[['cellid', 'time', self.tele_column]]
-            elif self.tele_column == 'mobile':
+            if self.tele_column not in ['internet', 'callin', 'callout', 'smsin', 'smsout', 'mobile', 'sms', 'call']:
+                raise ValueError("tele_column must be one of internet, callin, callout, smsin, smsout, mobile, sms, call")
+            if self.tele_column == 'mobile':
                 data['mobile'] = data['smsin'] + data['smsout'] + data['callin'] + data['callout'] + data['internet']
+            elif self.tele_column == 'call':
+                data['call'] = data['callin'] + data['callout']
+            elif self.tele_column == 'sms':
+                data['sms'] = data['smsin'] + data['smsout']
+            data = data[['cellid', 'time', self.tele_column]]
             data.to_csv(os.path.join(
                       self.data_dir, 'milan_{}_{}_data.csv.gz'.format(self.tele_column, self.time_range)), compression='gzip', index=False)
         else:
             print('{} already exists in {}'.format(self.file_name, self.data_dir))
 
     def setup(self, stage: Optional[str] = None) -> None:
+        if self.compare_mvstgn:
+            path = os.path.join(self.data_dir, 'data_git_version.h5')
+            if not os.path.exists(path):
+                raise FileNotFoundError("{} not found".format(path))
+            f = h5py.File(path, 'r')
+            if self.tele_column == 'sms':
+                data = f['data'][:, :, 0]
+            elif self.tele_column == 'call':
+                data = f['data'][:, :, 1]
+            elif self.tele_column == 'internet':
+                data = f['data'][:, :, 2]
+            else:
+                raise ValueError("{} is not a valid column".format(self.tele_column))
+            timesampes = pd.to_datetime(f['idx'][:].astype(str), format='%Y-%m-%d %H:%M:%S')
+
+            if self.normalize:
+                self.scaler = MinMaxScaler((0, self.max_norm))
+                data = self.scaler.fit_transform(data.reshape(-1, 1)).reshape(data.shape)
+
+            val_len = test_len = 168
+            train_len = len(data) - val_len - test_len
+            self.milan_timestamps = {
+                "train": timesampes[:train_len],
+                "val": timesampes[train_len:train_len+val_len],
+                "test": timesampes[train_len+val_len:train_len+val_len+test_len],
+            }
+            data = data.reshape(-1, 100, 100)
+            # crop data by grid_range
+            data = data[:, self.grid_range[0]-1:self.grid_range[1], self.grid_range[2]-1:self.grid_range[3]]
+
+            self.milan_train, self.milan_val, self.milan_test = self.train_test_split(data, train_len, val_len, test_len)
+            print('train shape: {}, val shape: {}, test shape: {}'.format(self.milan_train.shape, self.milan_val.shape, self.milan_test.shape))
+            return
+
         if not os.path.exists(os.path.join(self.data_dir, self.file_name)):
             raise FileNotFoundError('{} not found in {}'.format(self.file_name, self.data_dir))
         # Assign train/val datasets for use in dataloaders
@@ -155,8 +211,9 @@ class Milan(LightningDataModule):
 
         milan_data = pd.read_csv(filePath, compression='gzip', usecols=['cellid', 'time', self.tele_column])
         milan_data['time'] = pd.to_datetime(milan_data['time'], format='%Y-%m-%d %H:%M:%S')
-        cellids = gen_cellids_by_colrow(self.grid_range)
-        milan_data = milan_data.loc[milan_data['cellid'].isin(cellids)]
+        if self.grid_range is not None:
+            cellids = gen_cellids_by_colrow(self.grid_range)
+            milan_data = milan_data.loc[milan_data['cellid'].isin(cellids)]
         milan_data = milan_data.sort_values(['cellid', 'time']).reset_index(drop=True)
         if self.aggr_time == 'hour':
             milan_data = milan_data.groupby(['cellid', pd.Grouper(key="time", freq="1H")]).sum()
@@ -164,7 +221,7 @@ class Milan(LightningDataModule):
         self.milan_df = milan_data
 
         # reshape dataframe to ndarray of size (n_timesteps, n_cells)
-        milan_grid_data = milan_data.reset_index().pivot(index='time', columns='cellid', values=self.tele_column)
+        milan_grid_data = milan_data.pivot(index='time', columns='cellid', values=self.tele_column)
         milan_grid_data = milan_grid_data.replace([np.inf, -np.inf], np.nan)
         milan_grid_data = milan_grid_data.fillna(0).values
         # for debug -> set max to 2000
@@ -197,3 +254,13 @@ class Milan(LightningDataModule):
 
     def predict_dataloader(self):
         raise NotImplementedError
+
+
+# test
+if __name__ == '__main__':
+    milan = Milan(time_range='all', aggr_time='hour', tele_column='sms', grid_range=None)
+    milan.prepare_data()
+    milan.setup()   
+    sms_milan_train = np.concatenate((milan.milan_train, milan.milan_val), axis=0)
+    sms_milan_test = milan.milan_test
+    print(sms_milan_train[0][0])

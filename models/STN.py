@@ -14,9 +14,11 @@ class STN(STBase):
                  x_dim: int = 11,
                  y_dim: int = 11, 
                  seq_len: int = 12, 
+                 pred_len: int = 1,
                  **kwargs
                  ):
         super(STN, self).__init__(**kwargs)
+        self.pred_len = pred_len
         self.x_dim = x_dim
         self.y_dim = y_dim
         self.seq_len = seq_len

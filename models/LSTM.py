@@ -19,6 +19,7 @@ class LSTMRegressor(STBase):
                  num_layers, 
                  dropout, 
                  is_input_embedding=True,
+                 pred_len = 1, 
                  **kwargs
                  ):
         super(LSTMRegressor, self).__init__(**kwargs)
@@ -26,6 +27,7 @@ class LSTMRegressor(STBase):
         self.embedding_size = emb_size
         self.hidden_size = hidden_size
         self.seq_len = seq_len
+        self.pred_len = pred_len
         self.num_layers = num_layers
         self.dropout = dropout
         self.is_input_embedding = is_input_embedding
@@ -45,5 +47,6 @@ class LSTMRegressor(STBase):
         if self.is_input_embedding:
             x = self.input_embedding(x)
         x, _ = self.lstm(x) # lstm_out = (batch_size, seq_len, hidden_size)
-        y_pred = self.linear(x[:,-1])
+        x = self.linear(x).squeeze(2)
+        y_pred = x[:, -self.pred_len:]
         return y_pred
