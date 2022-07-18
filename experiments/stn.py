@@ -48,7 +48,7 @@ if __name__ == "__main__":
         flatten=False,
     )
 
-    wandb_logger = WandbLogger(project="spatio-temporal prediction",
+    wandb_logger = WandbLogger(project="milanST",
         name=f"stn_in{p['seq_len']}_out1_{'hr' if p['aggr_time']=='hour' else 'min'}_{p['time_range']}")
     wandb_logger.experiment.config["exp_tag"] = "STN"
     wandb_logger.experiment.config.update(p, allow_val_change=True)

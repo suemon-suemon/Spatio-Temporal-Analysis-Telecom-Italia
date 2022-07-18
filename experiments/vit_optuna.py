@@ -69,7 +69,7 @@ def create_vit_dm(trial):
 def objective(trial):
     model, dm = create_vit_dm(trial)
 
-    logger = WandbLogger(project="spatio-temporal prediction")
+    logger = WandbLogger(project="milanST")
     lr_monitor = LearningRateMonitor(logging_interval='step')
     logger.experiment.config["exp_tag"] = "vit_optuna"
     logger.experiment.config.update(trial.params, allow_val_change=True)

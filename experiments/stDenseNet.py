@@ -17,8 +17,8 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = '30days',
-        aggr_time = None,
+        time_range = 'all',
+        aggr_time = 'hour',
         tele_col = 'internet',
 
         normalize = True,
@@ -49,7 +49,7 @@ if __name__ == "__main__":
         channels = [p['close_len'], p['period_len'], p['trend_len']],
     )
 
-    # wandb_logger = WandbLogger(project="spatio-temporal prediction",
+    # wandb_logger = WandbLogger(project="milanST",
     #     name=f"STDense_in{p['close_len']}_out{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}")
     # wandb_logger.experiment.config["exp_tag"] = "stDenseNet"
     # wandb_logger.experiment.config.update(p)

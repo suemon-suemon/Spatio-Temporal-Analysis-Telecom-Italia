@@ -15,9 +15,9 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = 'all',
-        aggr_time = 'hour',
-        tele_col = 'internet',
+        time_range = '30days',
+        aggr_time = None,
+        tele_col = 'callout',
         batch_size = 1024,
         learning_rate = 1e-4,
         normalize = True,
@@ -53,8 +53,8 @@ if __name__ == "__main__":
         normalize=p['normalize'],
     )
     
-    wandb_logger = WandbLogger(project="spatio-temporal prediction",
-        name=f"stTran_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}")
+    wandb_logger = WandbLogger(project="milanST",
+        name=f"stTran_{p['tele_col']}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}")
     wandb_logger.experiment.config["exp_tag"] = "StTran"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -67,7 +67,7 @@ if __name__ == "__main__":
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
     )
 
-    # model = STTran.load_from_checkpoint('spatio-temporal prediction/vz5epxxk/checkpoints/epoch=163-step=165640.ckpt')
+    # model = STTran.load_from_checkpoint('milanST/vz5epxxk/checkpoints/epoch=163-step=165640.ckpt')
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
     # trainer.predict(model, datamodule=dm)

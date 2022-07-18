@@ -23,7 +23,6 @@ if __name__ == "__main__":
         batch_size = 256,
         learning_rate = 1e-4,
         normalize = True,
-        max_norm = 1,
         
         # model trainer
         max_epochs = 500,
@@ -48,10 +47,9 @@ if __name__ == "__main__":
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
         normalize=p['normalize'],
-        max_norm=p['max_norm']
     )
 
-    wandb_logger = WandbLogger(project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(project="milanST")
     wandb_logger.experiment.config["exp_tag"] = "TransformerE_{}".format('SW' if IS_SW else 'FG')
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')

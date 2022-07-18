@@ -53,7 +53,7 @@ if __name__ == "__main__":
         learning_rate = p['learning_rate'],
         is_input_embedding = p['is_input_embedding'],
     )
-    # model = LSTMRegressor.load_from_checkpoint("spatio-temporal prediction/29p5cwoa/checkpoints/epoch=199-step=193599.ckpt")
+    # model = LSTMRegressor.load_from_checkpoint("milanST/29p5cwoa/checkpoints/epoch=199-step=193599.ckpt")
     
     dm = MilanSW(
         tele_column=p['tele_col'],
@@ -65,7 +65,7 @@ if __name__ == "__main__":
         window_size=p['window_size'],
     )
 
-    # wandb_logger = WandbLogger(project="spatio-temporal prediction",
+    # wandb_logger = WandbLogger(project="milanST",
     #     name=f"LSTM_{p['close_len']}_{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}_{p['tele_col']}")
     # wandb_logger.experiment.config["exp_tag"] = "LSTM"
     # wandb_logger.experiment.config.update(p, allow_val_change=True)

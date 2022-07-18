@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from dtaidistance import dtw
 
 from datasets.Milan import Milan
 from utils.time_features import time_features
@@ -29,18 +30,18 @@ class MilanFG(Milan):
         Milan.setup(self, stage)
 
     def train_dataloader(self):
-        return DataLoader(self._get_dataset(self.milan_train, 'train'), batch_size=self.batch_size, shuffle=False, num_workers=1)
+        return DataLoader(self._get_dataset(self.milan_train, 'train', self.meta), batch_size=self.batch_size, shuffle=False, num_workers=1)
 
     def val_dataloader(self):
-        return DataLoader(self._get_dataset(self.milan_val, 'val'), batch_size=self.batch_size, shuffle=False, num_workers=4)
+        return DataLoader(self._get_dataset(self.milan_val, 'val', self.meta), batch_size=self.batch_size, shuffle=False, num_workers=4)
 
     def test_dataloader(self):
-        return DataLoader(self._get_dataset(self.milan_test, 'test'), batch_size=self.batch_size, shuffle=False, num_workers=4)
+        return DataLoader(self._get_dataset(self.milan_test, 'test', self.meta), batch_size=self.batch_size, shuffle=False, num_workers=4)
     
     def predict_dataloader(self):
         return self.test_dataloader()
 
-    def _get_dataset(self, data, stage):
+    def _get_dataset(self, data, stage, meta=None):
         if self.format == 'default':
             return MilanFullGridDataset(data, self.aggr_time, self.close_len, 
                                             self.period_len, self.trend_len, self.pred_len)
@@ -52,7 +53,7 @@ class MilanFG(Milan):
         elif self.format == 'stgcn':
             return MilanFGStgcnDataset(data, self.aggr_time, self.close_len, self.period_len, self.trend_len, self.pred_len)
         elif self.format == 'timeF':
-            return MilanFGTimeFDataset(data, self.milan_timestamps[stage], self.aggr_time, self.close_len, self.period_len, self.trend_len, self.pred_len)
+            return MilanFGTimeFDataset(data, meta, self.milan_timestamps[stage], self.aggr_time, self.close_len, self.period_len, self.trend_len, self.pred_len)
 
 
 class MilanFullGridDataset(Dataset):
@@ -140,6 +141,7 @@ class MilanFGInformerDataset(Dataset):
 class MilanFGTimeFDataset(Dataset):
     def __init__(self,
                  milan_data,
+                 meta,
                  timestamps,
                  aggr_time: str,
                  close_len: int = 12,
@@ -151,6 +153,8 @@ class MilanFGTimeFDataset(Dataset):
             raise ValueError("aggre_time must be None or 'hour'")
         self.time_level = aggr_time
         self.milan_data = milan_data
+        self.meta = meta
+
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
@@ -170,13 +174,15 @@ class MilanFGTimeFDataset(Dataset):
 
         X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         X = np.stack(X, axis=0).astype(np.float32)
+        # dist = dtw.distance_matrix_fast(X.reshape(self.in_len, -1).T.astype(np.float64))
         X = X.reshape((1, X.shape[0], X.shape[1], X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
+
         Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len].squeeze().astype(np.float32)
 
         X_timefeature = [self.timestamps[i] if i >= 0 else np.zeros((self.timestamps.shape[1])) for i in indices]
         X_timefeature = np.stack(X_timefeature, axis=0).astype(np.float32)
-       
-        return X, Y, X_timefeature
+        X_meta = self.meta.astype(np.float32)
+        return X, Y, X_timefeature, X_meta
 
 
 class MilanFGStTranDataset(Dataset):

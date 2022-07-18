@@ -45,10 +45,10 @@ if __name__ == "__main__":
         input_shape=(p['batch_size'], p['close_len'], 1, dm.n_rows, dm.n_cols),
         learning_rate=p['learning_rate'],
     )
-    # model = Mvstgn.load_from_checkpoint("spatio-temporal prediction/3eyl8rqy/checkpoints/epoch=203-step=14075.ckpt")
+    # model = Mvstgn.load_from_checkpoint("milanST/3eyl8rqy/checkpoints/epoch=203-step=14075.ckpt")
 
 
-    wandb_logger = WandbLogger(project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(project="milanST")
     wandb_logger.experiment.config["exp_tag"] = "Mvstgn"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')

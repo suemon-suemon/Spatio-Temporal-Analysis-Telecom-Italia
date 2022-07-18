@@ -16,9 +16,9 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = '30days',
-        aggr_time = None,
-        tele_col = 'callout',
+        time_range = 'all',
+        aggr_time = 'hour',
+        tele_col = 'internet',
         batch_size = 64,
         learning_rate = 1e-4,
         normalize = False,
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     )
 
     wandb_logger = WandbLogger(name=f"MLP_{'hr' if p['aggr_time']=='hour' else 'min'}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}_{p['tele_col']}", 
-                               project="spatio-temporal prediction")
+                               project="milanST")
     wandb_logger.experiment.config["exp_tag"] = "MLP"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -66,4 +66,4 @@ if __name__ == "__main__":
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
-    trainer.predict(model, datamodule=dm)
+    # trainer.predict(model, datamodule=dm)

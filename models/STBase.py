@@ -8,7 +8,7 @@ import torch
 from pytorch_lightning import LightningModule
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error, r2_score
 from torch.nn import L1Loss
-from torch.optim import Adam
+from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau, MultiStepLR
 from torchmetrics import (MeanAbsoluteError, MeanAbsolutePercentageError, MeanSquaredError,
                           SymmetricMeanAbsolutePercentageError, R2Score)
@@ -49,8 +49,8 @@ class STBase(LightningModule):
         raise NotImplementedError
         
     def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.learning_rate, weight_decay=1e-4)
-        scheduler = ReduceLROnPlateau(optimizer, 'min', patience=self.reduceLRPatience)
+        optimizer = AdamW(self.parameters(), lr=self.learning_rate, weight_decay=1e-4)
+        scheduler = ReduceLROnPlateau(optimizer, 'min', patience=self.reduceLRPatience, min_lr=1e-5)
         # scheduler = MultiStepLR(optimizer, milestones=[int(0.8 * 200), int(0.95 * 200)], gamma=0.1)
         return {
             'optimizer': optimizer, 'lr_scheduler': scheduler, 'monitor': 'val_loss'
@@ -174,6 +174,8 @@ class STBase(LightningModule):
         rmse_c = mean_squared_error(gt.flatten(), preds.flatten(), squared=False)
         self.log('test_RMSE_c', rmse_c, on_epoch=True)
 
+        self._error_analysis(gt, preds, save_flag=True)
+
         if self.show_fig:
             self._vis_gt_preds_topk(gt, preds, step='pred', save_flag=True)
 
@@ -205,6 +207,28 @@ class STBase(LightningModule):
         scaler = self.trainer.datamodule.scaler
         yn = scaler.inverse_transform(yn.reshape(-1, 1)).reshape(yn.shape)
         return torch.from_numpy(yn).cuda()
+
+    def _error_analysis(self, gt, preds, *, grid=(10, 10), save_flag=False):
+        fig = plt.figure(figsize=(20, 10))
+        gt = gt.reshape(-1, self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols)
+        preds = preds.reshape(-1, self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols)
+        gt_g = gt[:, grid[0], grid[1]]
+        preds_g = preds[:, grid[0], grid[1]]
+        ax = fig.add_subplot(1, 2, 1)
+        ax.plot(gt_g, label='Ground Truth', color='green')
+        ax.plot(preds_g, label='Prediction', color='blue')
+        ax.legend()
+
+        ax = fig.add_subplot(1, 2, 2)
+        error = preds_g - gt_g
+        ax.bar(np.arange(error.shape[0]), error, color='red')
+
+        fig.suptitle('Grid {}'.format(grid))
+        if save_flag:
+            save_dir = os.path.join(self.result_dir, str(self.logger.version))
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            fig.savefig(os.path.join(save_dir, 'error_analysis.png'))
 
     def _vis_gt_preds_topk(self, gt, preds, *, step, save_flag=False):
         pred_len = gt.shape[1]

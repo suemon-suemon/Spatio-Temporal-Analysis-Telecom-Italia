@@ -57,7 +57,7 @@ if __name__ == "__main__":
         criterion = p['criterion'],
     )
 
-    wandb_logger = WandbLogger(name="Stgcn_in6+3_pred6_hr_HI", project="spatio-temporal prediction")
+    wandb_logger = WandbLogger(name="Stgcn_in6+3_pred6_hr_HI", project="milanST")
     wandb_logger.experiment.config["exp_tag"] = "Stgcn"
     wandb_logger.experiment.config.update(p)
     lr_monitor = LearningRateMonitor(logging_interval='step')

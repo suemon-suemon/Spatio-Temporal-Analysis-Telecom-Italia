@@ -54,7 +54,7 @@ def create_LSTM_dm(trial):
 def objective(trial):
     model, dm = create_LSTM_dm(trial)
 
-    logger = WandbLogger(project="spatio-temporal prediction")
+    logger = WandbLogger(project="milanST")
     lr_monitor = LearningRateMonitor(logging_interval='step')
     logger.experiment.config["exp_tag"] = "LSTM_hr_search"
     logger.experiment.config.update(trial.user_attrs, allow_val_change=True)

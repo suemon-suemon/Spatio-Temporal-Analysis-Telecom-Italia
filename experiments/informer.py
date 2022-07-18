@@ -81,8 +81,8 @@ if __name__ == "__main__":
             normalize=p['normalize'],
         )
         
-    # model = Informer.load_from_checkpoint("spatio-temporal prediction/36jlvz18/checkpoints/epoch=105-step=1788749.ckpt")
-    wandb_logger = WandbLogger(project="spatio-temporal prediction")
+    # model = Informer.load_from_checkpoint("milanST/36jlvz18/checkpoints/epoch=105-step=1788749.ckpt")
+    wandb_logger = WandbLogger(project="milanST")
     wandb_logger.experiment.config["exp_tag"] = "Informer_{}".format('SW' if IS_SW else 'FG')
     wandb_logger.experiment.config.update(p, allow_val_change=True)
     lr_monitor = LearningRateMonitor(logging_interval='step')

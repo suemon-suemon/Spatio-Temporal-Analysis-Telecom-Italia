@@ -26,5 +26,4 @@ class MLP(STBase):
         x = rearrange(img, 'b s h w -> b h w s')
         x = self.MLP(x)
         x = rearrange(x, 'b h w s -> b s h w')
-        res = repeat(torch.mean(img, dim=1), 'b h w -> b s h w', s=self.pred_len)
-        return x + res
+        return x
