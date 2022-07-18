@@ -212,7 +212,7 @@ class Milan(LightningDataModule):
 
         with h5py.File(filePath, 'r') as f: # shape (T_len, N_grids, 5)
             data = f['data'][:]
-            self.timestamps = f['time'][:]
+            self.timestamps =pd.to_datetime(f['time'][:].astype(str), format='%Y-%m-%d %H:%M:%S')
         
         if self.tele_column == 'smsin':
             data = data[:, :, 0]

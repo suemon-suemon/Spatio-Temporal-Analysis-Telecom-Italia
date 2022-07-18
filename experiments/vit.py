@@ -20,7 +20,7 @@ if __name__ == "__main__":
         time_range = 'all',
         aggr_time = 'hour',
         tele_col = 'internet',
-        compare_mvstgn = True,
+        compare_mvstgn = False,
         grid_range = (41, 60, 41, 60),
         load_meta = True,
 
@@ -95,23 +95,23 @@ if __name__ == "__main__":
         pred_len=p['pred_len'],
     )
 
-    wandb_logger = WandbLogger(
-        name=f"vit_{'hr' if p['aggr_time']=='hour' else 'min'}_{p['tele_col']}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}", 
-        project="milanST",
-        # version='st1nzjid',
-        # resume=True,
-    )
-    wandb_logger.experiment.config["exp_tag"] = "ViT"
-    wandb_logger.experiment.config.update(p, allow_val_change=True)
-    wandb.save('models/ViT.py')
-    wandb.save('models/ViT_matrix.py')
+    # wandb_logger = WandbLogger(
+    #     name=f"vit_{'hr' if p['aggr_time']=='hour' else 'min'}_{p['tele_col']}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}", 
+    #     project="milanST",
+    #     # version='st1nzjid',
+    #     # resume=True,
+    # )
+    # wandb_logger.experiment.config["exp_tag"] = "ViT"
+    # wandb_logger.experiment.config.update(p, allow_val_change=True)
+    # wandb.save('models/ViT.py')
+    # wandb.save('models/ViT_matrix.py')
 
     lr_monitor = LearningRateMonitor(logging_interval='step')
     checkpoint_callback = ModelCheckpoint(save_top_k=1, save_last=True, monitor="val_loss")
     trainer = Trainer(
         max_epochs=p['max_epochs'],
         log_every_n_steps=10,
-        logger=wandb_logger,
+        # logger=wandb_logger,
         gpus=1,
         callbacks=[lr_monitor, checkpoint_callback, EarlyStopping(patience=15, monitor="val_loss")],
     )
