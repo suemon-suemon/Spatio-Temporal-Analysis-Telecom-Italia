@@ -22,6 +22,7 @@ class STBase(LightningModule):
                  criterion = L1Loss,
                  reduceLR: bool = True,
                  reduceLRPatience: int = 10,
+                 nb_flows = 1,
                  show_fig: bool = False,
                  ):
         super().__init__()
@@ -29,6 +30,7 @@ class STBase(LightningModule):
         self.criterion = criterion()
         self.reduceLR = reduceLR
         self.reduceLRPatience = reduceLRPatience
+        self.nb_flows = nb_flows
         self.show_fig = show_fig
         self.save_hyperparameters()
 
@@ -127,8 +129,8 @@ class STBase(LightningModule):
             preds = y_hat.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
             gt = y.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
         else:
-            preds = y_hat.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
-            gt = y.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+            preds = y_hat.view(-1, self.nb_flows, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+            gt = y.view(-1, self.nb_flows, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
         
         # Compute RMSE for each sample
         RMSE = np.mean([mean_squared_error(gt[i].flatten(), preds[i].flatten(), squared=False) for i in range(gt.shape[0])])
@@ -147,8 +149,8 @@ class STBase(LightningModule):
             preds = y_hat.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
             gt = y.view(-1, self.trainer.datamodule.n_grids, pred_len).transpose(1, 2).cpu().detach().numpy()
         else:
-            preds = y_hat.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
-            gt = y.view(-1, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+            preds = y_hat.view(-1, self.nb_flows,  pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
+            gt = y.view(-1, self.nb_flows, pred_len, self.trainer.datamodule.n_grids).cpu().detach().numpy()
         
         mae = mean_absolute_error(gt.ravel(), preds.ravel())
         self.log('test_MAE', mae, on_epoch=True)
@@ -158,6 +160,16 @@ class STBase(LightningModule):
         self.log('test_R2', r2, on_epoch=True)
         rmse = np.mean([mean_squared_error(gt[i].flatten(), preds[i].flatten(), squared=False) for i in range(gt.shape[0])])
         self.log('test_RMSE', rmse, on_epoch=True)
+
+        if self.nb_flows == 2:
+            mae_c1 = mean_absolute_error(gt[:, 0].ravel(), preds[:, 0].ravel())
+            self.log('test_MAE_c1', mae_c1, on_epoch=True)
+            mae_c2 = mean_absolute_error(gt[:, 1].ravel(), preds[:, 1].ravel())
+            self.log('test_MAE_c2', mae_c2, on_epoch=True)
+            rmse_c1 = np.mean([mean_squared_error(gt[i, 0].flatten(), preds[i, 0].flatten(), squared=False) for i in range(gt.shape[0])])
+            self.log('test_RMSE_c1', rmse_c1, on_epoch=True)
+            rmse_c2 = np.mean([mean_squared_error(gt[i, 1].flatten(), preds[i, 1].flatten(), squared=False) for i in range(gt.shape[0])])
+            self.log('test_RMSE_c2', rmse_c2, on_epoch=True)
 
         preds[-24] = ((gt[-25] + gt[-26] + gt[-27]) / 3.0) * 2.5
 
@@ -209,19 +221,35 @@ class STBase(LightningModule):
         return torch.from_numpy(yn).cuda()
 
     def _error_analysis(self, gt, preds, *, grid=(10, 10), save_flag=False):
-        fig = plt.figure(figsize=(20, 10))
-        gt = gt.reshape(-1, self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols)
-        preds = preds.reshape(-1, self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols)
-        gt_g = gt[:, grid[0], grid[1]]
-        preds_g = preds[:, grid[0], grid[1]]
-        ax = fig.add_subplot(1, 2, 1)
-        ax.plot(gt_g, label='Ground Truth', color='green')
-        ax.plot(preds_g, label='Prediction', color='blue')
-        ax.legend()
+        if self.nb_flows == 1:
+            fig = plt.figure(figsize=(20, 10))
+            gt = gt.reshape(-1, self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols)
+            preds = preds.reshape(-1, self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols)
+            gt_g = gt[:, grid[0], grid[1]]
+            preds_g = preds[:, grid[0], grid[1]]
+            ax = fig.add_subplot(1, 2, 1)
+            ax.plot(gt_g, label='Ground Truth', color='green')
+            ax.plot(preds_g, label='Prediction', color='blue')
+            ax.legend()
 
-        ax = fig.add_subplot(1, 2, 2)
-        error = preds_g - gt_g
-        ax.bar(np.arange(error.shape[0]), error, color='red')
+            ax = fig.add_subplot(1, 2, 2)
+            error = preds_g - gt_g
+            ax.bar(np.arange(error.shape[0]), error, color='red')
+        elif self.nb_flows == 2:
+            fig = plt.figure(figsize=(20, 20))
+            gt = gt.reshape(-1, self.nb_flows, self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols)
+            preds = preds.reshape(-1, self.nb_flows, self.trainer.datamodule.n_rows, self.trainer.datamodule.n_cols)
+            for i in range(2):
+                gt_g = gt[:, i, grid[0], grid[1]]
+                preds_g = preds[:, i, grid[0], grid[1]]
+                ax = fig.add_subplot(self.nb_flows, 2, 2*i+1)
+                ax.plot(gt_g, label='Ground Truth', color='green')
+                ax.plot(preds_g, label='Prediction', color='blue')
+                ax.legend()
+
+                ax = fig.add_subplot(self.nb_flows, 2, 2*i+2)
+                error = preds_g - gt_g
+                ax.bar(np.arange(error.shape[0]), error, color='red')
 
         fig.suptitle('Grid {}'.format(grid))
         if save_flag:

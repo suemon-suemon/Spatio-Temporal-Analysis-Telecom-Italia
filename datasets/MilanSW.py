@@ -35,6 +35,16 @@ class MilanSW(Milan):
     
     def setup(self, stage=None):
         Milan.setup(self, stage)
+        train_len, val_len, test_len = self.get_default_len(self.time_range)
+        self.milan_timestamps = {
+            "train": self.timestamps[:train_len],
+            "val": self.timestamps[train_len:train_len+val_len],
+            "test": self.timestamps[train_len+val_len-(self.close_len+self.pred_len-1):train_len+val_len+test_len],
+        }
+        self.milan_train, self.milan_val, self.milan_test = self.train_test_split(self.milan_grid_data, train_len, val_len, test_len)
+        self.milan_test = np.concatenate((self.milan_val[-(self.close_len+self.pred_len-1):], self.milan_test))
+        print('train shape: {}, val shape: {}, test shape: {}'.format(self.milan_train.shape, self.milan_val.shape, self.milan_test.shape))
+
 
     def train_dataloader(self):
         return DataLoader(self._get_dataset(self.milan_train, 'train'), batch_size=self.batch_size, shuffle=False, num_workers=16)

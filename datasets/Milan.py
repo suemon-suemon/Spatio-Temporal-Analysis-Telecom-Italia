@@ -22,17 +22,19 @@ class Milan(LightningDataModule):
                  time_range: str = 'all',
                  compare_mvstgn: bool = False,
                  load_meta: bool = True,
+                 impute_missing: bool = True,
                  ): 
         super(Milan, self).__init__()
         self.compare_mvstgn = compare_mvstgn
         self.load_meta = load_meta
         self.meta_file_name = 'crawled_feature.csv'
+        self.impute_missing = impute_missing
 
         if aggr_time not in [None, 'hour']:
             raise ValueError("aggre_time must be None or 'hour'")
         self.aggr_time = aggr_time
 
-        if tele_column not in ['internet', 'call', 'callin', 'callout', 'sms', 'smsin', 'smsout']:
+        if tele_column not in ['internet', 'call', 'callin', 'callout', 'sms', 'smsin', 'smsout', 'sms2', 'call2']:
             raise ValueError('tele_column must be one of internet, call, callin, callout, sms, smsin, smsout')
         self.tele_column = tele_column
 
@@ -161,7 +163,7 @@ class Milan(LightningDataModule):
                 data = f['data'][:, :, 2]
             else:
                 raise ValueError("{} is not a valid column".format(self.tele_column))
-            timesampes = pd.to_datetime(f['idx'][:].astype(str), format='%Y-%m-%d %H:%M:%S')
+            self.timesampes = pd.to_datetime(f['idx'][:].astype(str), format='%Y-%m-%d %H:%M:%S')
 
             if self.normalize:
                 self.scaler = MinMaxScaler((0, 1))
@@ -169,35 +171,15 @@ class Milan(LightningDataModule):
 
             val_len = test_len = 168
             train_len = len(data) - val_len - test_len
-            self.milan_timestamps = {
-                "train": timesampes[:train_len],
-                "val": timesampes[train_len:train_len+val_len],
-                "test": timesampes[train_len+val_len:train_len+val_len+test_len],
-            }
             data = data.reshape(-1, 100, 100)
             # crop data by grid_range
             data = data[:, self.grid_range[0]-1:self.grid_range[1], self.grid_range[2]-1:self.grid_range[3]]
-
-            self.milan_train, self.milan_val, self.milan_test = self.train_test_split(data, train_len, val_len, test_len)
-            print('train shape: {}, val shape: {}, test shape: {}'.format(self.milan_train.shape, self.milan_val.shape, self.milan_test.shape))
             return
 
         if not os.path.exists(os.path.join(self.data_dir, self.file_name)):
             raise FileNotFoundError('{} not found in {}'.format(self.file_name, self.data_dir))
         # Assign train/val datasets for use in dataloaders
-        train_len, val_len, test_len = self.get_default_len(self.time_range)
         self._load_data()
-        self.milan_timestamps = {
-            "train": self.timestamps[:train_len],
-            "val": self.timestamps[train_len:train_len+val_len],
-            "test": self.timestamps[train_len+val_len:train_len+val_len+test_len],
-        }
-        milan_train, milan_val, milan_test = Milan.train_test_split(self.milan_grid_data, train_len, val_len, test_len)
-        self.milan_train = milan_train.reshape(-1, self.n_rows, self.n_cols)
-        self.milan_val = milan_val.reshape(-1, self.n_rows, self.n_cols)
-        self.milan_test = milan_test.reshape(-1, self.n_rows, self.n_cols)
-        print('train shape: {}, val shape: {}, test shape: {}'.format(self.milan_train.shape, self.milan_val.shape, self.milan_test.shape))
-
 
     def _load_data(self):
         if hasattr(self, 'milan_grid_data'):
@@ -215,33 +197,48 @@ class Milan(LightningDataModule):
             self.timestamps =pd.to_datetime(f['time'][:].astype(str), format='%Y-%m-%d %H:%M:%S')
         
         if self.tele_column == 'smsin':
-            data = data[:, :, 0]
+            data = data[:, :, 0:1]
         elif self.tele_column == 'smsout':
-            data = data[:, :, 1]
+            data = data[:, :, 1:2]
         elif self.tele_column == 'callin':
-            data = data[:, :, 2]
+            data = data[:, :, 2:3]
         elif self.tele_column == 'callout':
-            data = data[:, :, 3]
+            data = data[:, :, 3:4]
         elif self.tele_column == 'internet':
-            data = data[:, :, 4]
+            data = data[:, :, 4:5]
         elif self.tele_column == 'sms':
-            data = data[:, :, 0] + data[:, :, 1]
+            data = data[:, :, 0:1] + data[:, :, 1:2]
         elif self.tele_column == 'call':
-            data = data[:, :, 2] + data[:, :, 3]
+            data = data[:, :, 2:3] + data[:, :, 3:4]
+        elif self.tele_column == 'sms2':
+            data = data[:, :, 0:2]
+        elif self.tele_column == 'call2':
+            data = data[:, :, 2:4]
         else:
             raise ValueError("{} is not a valid column".format(self.tele_column))
 
-        data = data.reshape(data.shape[0], 100, 100)
+        data = data.reshape(data.shape[0], 100, 100, -1).transpose((0, 3, 1, 2))
         if self.grid_range is not None:
-            data = data[:, self.grid_range[0]-1:self.grid_range[1], self.grid_range[2]-1:self.grid_range[3]]
-
+            oridata = data
+            data = data[:, :, self.grid_range[0]-1:self.grid_range[1], self.grid_range[2]-1:self.grid_range[3]]
+        
+        for id in np.argwhere(np.isnan(data)):
+            if self.impute_missing:
+                oriid = [id[0], id[1], id[2]+self.grid_range[0]-1, id[3]+self.grid_range[2]-1]
+                surroundings = np.array([oridata[oriid[0], oriid[1], oriid[1]-1, oriid[2]], 
+                                        oridata[oriid[0], oriid[1], oriid[1]+1, oriid[2]], 
+                                        oridata[oriid[0], oriid[1], oriid[1], oriid[2]-1], 
+                                        oridata[oriid[0], oriid[1], oriid[1], oriid[2]+1]])
+                data[id[0], id[1], id[2], id[3]] = np.nanmean(surroundings)
+            else:
+                data[id[0], id[1], id[2], id[3]] = 0
         if self.normalize:
             self.scaler = MinMaxScaler((0, 1))
             data = self.scaler.fit_transform(data.reshape(-1, 1)).reshape(data.shape)
         # Input and parameter tensors are not the same dtype, found input tensor with Double and parameter tensor with Float
         self.milan_grid_data = data.astype(np.float32)
         
-        print("loaded {} rows and {} grids".format(data.shape[0], data.shape[1]))
+        print("loaded data shape: ".format(data.shape))
 
     def train_dataloader(self):
         raise NotImplementedError
@@ -257,9 +254,16 @@ class Milan(LightningDataModule):
 
 # test
 if __name__ == '__main__':
-    milan = Milan(time_range='all', aggr_time=None, tele_column='sms', grid_range=None, load_meta=True)
+    milan = Milan(time_range='all', aggr_time='hour', tele_column='sms2', grid_range=(41, 70, 41, 70), load_meta=True)
     milan.prepare_data()
     milan.setup()
     sms_milan_train = np.concatenate((milan.milan_train, milan.milan_val), axis=0)
     sms_milan_test = milan.milan_test
-    print(sms_milan_train[0][0])
+    print(sms_milan_test.shape)
+
+    milan2 = Milan(time_range='all', aggr_time='hour', tele_column='smsin', grid_range=(41, 70, 41, 70), load_meta=True)
+    milan2.prepare_data()
+    milan2.setup()
+    sms_milan_train2 = np.concatenate((milan2.milan_train, milan2.milan_val), axis=0)
+    sms_milan_test2 = milan2.milan_test
+    print(sms_milan_test2.shape)

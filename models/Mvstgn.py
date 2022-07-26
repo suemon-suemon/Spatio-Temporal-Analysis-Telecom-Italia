@@ -7,6 +7,7 @@ from collections import OrderedDict
 from models.STBase import STBase
 
 
+
 class ConvLSTMCell(nn.Module):
     def __init__(self, input_size, input_dim, hidden_dim, kernel_size):
         super(ConvLSTMCell, self).__init__()
@@ -25,6 +26,8 @@ class ConvLSTMCell(nn.Module):
     def forward(self, input_tensor, cur_state):
 
         h_cur, c_cur = cur_state
+        # h_cur = h_cur.to(device)
+        # c_cur = c_cur.to(device)
         combined = torch.cat([input_tensor, h_cur], dim=1)
         gates = self.Gates(combined)
         in_gate, remember_gate, out_gate, cell_gate = gates.chunk(4, 1)
@@ -354,6 +357,7 @@ class PositionwiseFeedForward(nn.Module):
 
         return x
 
+
 class trendAttentionLayer(nn.Module):
     def __init__(self, d_model, d_inner, n_head, d_k, d_v, seq_len, dropout=0.1):
 
@@ -597,10 +601,12 @@ class Mvstgn(STBase):
                  bn_size=4,
                  drop_rate=0.2, 
                  nb_flows=1,
+                 pred_len=1,
                  **kwargs):
         super(Mvstgn, self).__init__(**kwargs)
         self.input_shape = input_shape
         self.seq_len = self.input_shape[1]
+        self.pred_len = pred_len
         self.filters = num_init_features 
         self.channels = nb_flows
         self.h, self.w = self.input_shape[-2], self.input_shape[-1]
@@ -664,7 +670,7 @@ class Mvstgn(STBase):
                     m.bias.data.zero_()
 
     def forward(self, x):
-        x = x.transpose(1, 2) # [B, Seq, F, H, W]
+        # x = x.transpose(1, 2) # [B, Seq, F, H, W]
         batch_size, seq_len, features, num_of_cells, _ = x.shape 
         x = x.view(batch_size, seq_len, features, num_of_cells*num_of_cells).transpose(2,3)
 
@@ -676,6 +682,7 @@ class Mvstgn(STBase):
         out = out.view(batch_size, -1, num_of_cells, num_of_cells)
 
         out = self.features(out)
-        out = out.squeeze()
+        # out = out.squeeze()
+
         out = torch.sigmoid(out) 
         return out
