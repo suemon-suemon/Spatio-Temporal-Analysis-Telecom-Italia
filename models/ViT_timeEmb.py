@@ -167,7 +167,7 @@ class MLPDecoder(nn.Module):
         # else:
         #     temporal_in = n_input * c_groups
          
-        self.spatial = nn.Sequential(nn.ConvTranspose2d(n_input*c_groups, pred_len, kernel_size=stride_size, stride=stride_size),)
+        
         # self.mlp_temporal = nn.Sequential(nn.Conv2d(temporal_in, n_hidden, kernel_size=1, padding=0),
         #                                  nn.GELU(),
         #                                  nn.Conv2d(n_hidden, n_hidden, kernel_size=1, padding=0),
@@ -177,17 +177,12 @@ class MLPDecoder(nn.Module):
         #                                  nn.Conv2d(n_hidden, pred_len, kernel_size=1, padding=0))
 
     def forward(self, x):
-        x = rearrange(x, 'b (h w cg) d -> b (cg d) h w', 
-                         cg=self.c_groups, 
-                         h=self.img_height//self.patch_height, 
-                         w=self.img_width//self.patch_width)
-        # if self.patch_height > 1:
-        x = self.spatial(x)
+
         # x = self.mlp_temporal(x)
         return x
 
 
-class ViT_matrix(STBase):
+class ViT_timeEmb(STBase):
     def __init__(self, *, image_size=(30, 30), # (11, 11)
                           patch_size, # (3, 3)
                           stride_size, # (2, 2)
@@ -209,7 +204,7 @@ class ViT_matrix(STBase):
                           d_decoder = 256,
                           dropout = 0.1, 
                           **kwargs):
-        super(ViT_matrix, self).__init__(**kwargs)
+        super(ViT_timeEmb, self).__init__(**kwargs)
         self.seq_len = close_len + period_len * pred_len
         self.close_len = close_len
         self.period_len = period_len
@@ -219,6 +214,8 @@ class ViT_matrix(STBase):
         patch_height, patch_width = pair(patch_size)
         stride_height, stride_width = pair(stride_size)
         padding_height, padding_width = pair(padding_size)
+        self.patch_height = patch_height
+        self.patch_width = patch_width
 
         # assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
         self.num_patches = (((image_height - patch_height) // stride_height + 2 * padding_height + 1) * 
@@ -229,7 +226,6 @@ class ViT_matrix(STBase):
         self.conv_features = nn.Sequential(
             nn.Conv2d(self.seq_len, conv_channels*self.seq_len, kernel_size=3, padding='same', groups=self.seq_len),
         )
-
 
         self.to_patch_embedding = nn.Sequential(
             nn.Unfold(kernel_size = patch_size, stride = stride_size, padding=padding_size), # (N, C, *) -> (N, C × ∏(kernel_size), L)
@@ -246,19 +242,18 @@ class ViT_matrix(STBase):
         self.transformerEncoder = nn.TransformerEncoder(encoder_layer, depth)
         # self.transformerEncoder = Transformer(dim, depth, heads, 64, mlp_dim, dropout)
 
-        self.decoder = MLPDecoder(conv_channels, dim, stride_size, image_size, n_hidden=d_decoder, c_groups=channels_group, inner_channels=inner_channels)
+        self.spatial = nn.Sequential(nn.ConvTranspose2d(dim*channels_group, inner_channels, kernel_size=stride_size, stride=stride_size),)
 
-        self.mlp_temporal = nn.Sequential(nn.Conv2d(conv_channels, d_decoder, kernel_size=1, padding=0),
+        self.mlp_temporal = nn.Sequential(nn.Conv2d(inner_channels, d_decoder, kernel_size=1, padding=0),
                                         nn.GELU(),
                                         nn.Conv2d(d_decoder, d_decoder, kernel_size=1, padding=0),
                                         nn.GELU(),
-                                        # nn.Conv2d(d_decoder, d_decoder, kernel_size=1, padding=0),
-                                        # nn.GELU(),
                                         nn.Conv2d(d_decoder, pred_len, kernel_size=1, padding=0))
 
 
     def forward(self, x, x_mark):
         x = x.squeeze(2)
+        b, s, h, w = x.shape
         res = repeat(torch.mean(x[:, -1:], dim=1), 'b h w -> b s h w', s=self.pred_len)
         
         conv = self.conv_features(x)
@@ -272,10 +267,15 @@ class ViT_matrix(STBase):
         src += time_embedding
 
         tr_en = self.transformerEncoder(src)
-        # x = self.mlp_temporal(self.gate_fusion(self.decoder(tr_en), conv))
-        # x = self.mlp_temporal(torch.cat([self.decoder(tr_en), conv], dim=1))
-        # x = self.mlp_temporal(self.decoder(tr_en))
-        x = self.mlp_temporal(self.decoder(tr_en))
+
+        x = rearrange(tr_en, 'b (h w cg) d -> b (cg d) h w', 
+                         cg=self.channels_group, 
+                         h=h//self.patch_height, 
+                         w=w//self.patch_width)
+        if self.patch_height > 1:
+           x = self.spatial(x)
+
+        x = self.mlp_temporal(x)
         return (x+res).unsqueeze(2)
     
     def _process_one_batch(self, batch):
