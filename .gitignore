@@ -12,6 +12,7 @@ wandb/
 spatio-temporal prediction/
 lightning_logs/
 milanST/
+**/*[Ll]logs*
 
 # vs code
 .vscode/

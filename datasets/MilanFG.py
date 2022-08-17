@@ -101,7 +101,7 @@ class MilanFullGridDataset(Dataset):
         X = np.stack(X, axis=0).astype(np.float32)
         # X = X.reshape((1, X.shape[0], X.shape[1], X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
 
-        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len].squeeze().astype(np.float32)
+        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len].astype(np.float32)
         return X, Y
 
 
@@ -139,7 +139,7 @@ class MilanFGInformerDataset(Dataset):
                                         self.close_len, self.period_len, self.trend_len)
         X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         X = np.stack(X, axis=0)
-        X = X.reshape((X.shape[0], X.shape[1] * X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
+        X = X.reshape((X.shape[0], X.shape[2] * X.shape[3])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
 
         Y = self.milan_data[out_start_idx-self.label_len: out_start_idx+self.pred_len].squeeze()
         Y = Y.reshape((Y.shape[0], Y.shape[1] * Y.shape[2]))

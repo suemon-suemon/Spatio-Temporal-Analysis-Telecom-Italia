@@ -47,7 +47,7 @@ class MilanSW(Milan):
 
 
     def train_dataloader(self):
-        return DataLoader(self._get_dataset(self.milan_train, 'train'), batch_size=self.batch_size, shuffle=False, num_workers=16)
+        return DataLoader(self._get_dataset(self.milan_train, 'train'), batch_size=self.batch_size, shuffle=True, num_workers=16)
 
     def val_dataloader(self):
         return DataLoader(self._get_dataset(self.milan_val, 'val'), batch_size=self.batch_size, shuffle=False, num_workers=8)
@@ -62,7 +62,7 @@ class MilanSW(Milan):
         if self.format =='informer':
             dataset =  MilanSWInformerDataset(data, self.milan_timestamps[stage],  
                                           aggr_time=self.aggr_time, input_len=self.close_len, 
-                                          window_size=self.window_size, label_len=self.label_len)
+                                          window_size=self.window_size, label_len=self.label_len, pred_len=self.pred_len)
         elif self.format == 'sttran':
             dataset =  MilanSWStTranDataset(data, self.aggr_time, self.close_len, 
                                         self.period_len, self.pred_len)
@@ -161,22 +161,24 @@ class MilanSWInformerDataset(Dataset):
                  aggr_time = None,
                  window_size: int = 11,
                  input_len: int = 12,
-                 label_len: int = 12):
+                 label_len: int = 12, 
+                 pred_len: int = 1,):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
-        self.milan_data = milan_data
+        self.milan_data = milan_data.squeeze()
         self.timestamps = time_features(timestamps, timeenc=1,
                                         freq='h' if aggr_time == 'hour' else 't')
         pad_size = window_size // 2
         self.window_size = window_size
         self.input_len = input_len
         self.label_len = label_len
+        self.pred_len = pred_len
         self.milan_data_pad = np.pad(self.milan_data,
                                      ((0, 0), (pad_size, pad_size),
                                       (pad_size, pad_size)),
                                      'constant', constant_values=0)
     
     def __len__(self):
-        return (self.milan_data.shape[0] - self.input_len) * self.milan_data.shape[1] * self.milan_data.shape[2]
+        return (self.milan_data.shape[0] - self.input_len - self.pred_len + 1) * self.milan_data.shape[1] * self.milan_data.shape[2]
 
     def __getitem__(self, index):
         n_slice = index // (self.milan_data.shape[1] * self.milan_data.shape[2])
@@ -188,9 +190,9 @@ class MilanSWInformerDataset(Dataset):
                                 n_row:n_row+self.window_size,
                                 n_col:n_col+self.window_size]
         X_timefeature = self.timestamps[n_slice:n_slice+self.input_len]
-        Y_timefeature = self.timestamps[n_slice+self.input_len-self.label_len: n_slice+self.input_len+1]
+        Y_timefeature = self.timestamps[n_slice+self.input_len-self.label_len: n_slice+self.input_len+self.pred_len]
         X = X.reshape((self.input_len, self.window_size * self.window_size))
-        Y = self.milan_data[n_slice+self.input_len-self.label_len: n_slice+self.input_len+1, n_row, n_col].reshape(-1, 1)
+        Y = self.milan_data[n_slice+self.input_len-self.label_len: n_slice+self.input_len+self.pred_len, n_row, n_col].reshape(-1, 1)
         return X, Y, X_timefeature, Y_timefeature 
 
 
