@@ -38,6 +38,7 @@ class MilanFG(Milan):
             "test": self.timestamps[train_len+val_len-(self.close_len+self.pred_len-1):train_len+val_len+test_len],
         }
         self.milan_train, self.milan_val, self.milan_test = self.train_test_split(self.milan_grid_data, train_len, val_len, test_len)
+        self.mialn_val = np.concatenate((self.milan_train[-(self.close_len+self.pred_len-1):], self.milan_val))
         self.milan_test = np.concatenate((self.milan_val[-(self.close_len+self.pred_len-1):], self.milan_test))
         print('train shape: {}, val shape: {}, test shape: {}'.format(self.milan_train.shape, self.milan_val.shape, self.milan_test.shape))
 

@@ -59,9 +59,12 @@ class DenseNetUnit(nn.Sequential):
             num_features = num_features + num_layers * growth_rate
 
             # Final batch norm
+            dim_inner = 256
             self.features.add_module('normlast', nn.BatchNorm2d(num_features))
-            self.features.add_module('convlast', nn.Conv2d(num_features, nb_flows,
-                                                           kernel_size=1, padding=0, bias=False))
+            self.features.add_module('convlast', nn.Conv2d(num_features, dim_inner, kernel_size=1, padding=0, bias=False))
+            self.features.add_module('relulast', nn.ReLU(inplace=True))
+            self.features.add_module('normlast2', nn.BatchNorm2d(dim_inner))
+            self.features.add_module('convlast2', nn.Conv2d(dim_inner, nb_flows, kernel_size=1, padding=0, bias=False))
 
             for m in self.modules():
                 if isinstance(m, nn.Conv2d):
@@ -117,25 +120,33 @@ class DeDenseNet(STBase):
     def __init__(self, 
                  channels: int=12,
                  pred_len: int=1,
+                 *,
+                layers_s = 4,
+                growth_rate_s = 32,
+                num_init_features_s = 32,
+                bn_size_s = 4,
+
+                layers_t = 4,
+                growth_rate_t = 32,
+                num_init_features_t = 32,
+                bn_size_t = 4,
+
+                drop_rate = 0.3,
+                kernel_size = 25,
                  **kwargs):
         super(DeDenseNet, self).__init__(**kwargs)
         self.channels_close = channels
         self.seq_len = self.channels_close
         self.pred_len = pred_len
         self.save_hyperparameters()
-        layers = 4
-        growth_rate = 64
-        num_init_features = 64
-        bn_size = 4
-        drop_rate = 0.25
 
-        kernel_size = 7
         self.decompsition = series_decomp(kernel_size)
-        self.seasonal = DenseNetUnit(self.channels_close, 1, layers, growth_rate, num_init_features, bn_size, drop_rate)
-        self.trend = DenseNetUnit(self.channels_close, 1, layers, growth_rate, num_init_features, bn_size, drop_rate)
+        self.seasonal = DenseNetUnit(self.channels_close, 1, layers_s, growth_rate_s, num_init_features_s, bn_size_s, drop_rate)
+        self.trend = DenseNetUnit(self.channels_close, 1, layers_t, growth_rate_t, num_init_features_t, bn_size_t, drop_rate)
 
     def forward(self, x):
         x = x.squeeze(2)
+        # seasonal_init = x
         seasonal_init, trend_init = self.decompsition(x.view(x.size(0), x.size(1), -1))
         seasonal_init = seasonal_init.view(x.shape)
         trend_init = trend_init.view(x.shape)
