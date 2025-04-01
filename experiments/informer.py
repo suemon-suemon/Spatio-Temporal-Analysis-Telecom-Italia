@@ -11,19 +11,19 @@ from pytorch_lightning.loggers import WandbLogger
 from torch import nn
 
 if __name__ == "__main__":
-    IS_SW = True
+    IS_SW = False
     seed_everything(42)
 
     p = dict(
         # dataset
         time_range = 'all',
         aggr_time = None,
-        batch_size = 512,
+        batch_size = 64,
         learning_rate = 1e-3,
-        normalize = False,
+        normalize = True,
         
         # model trainer
-        max_epochs = 500,
+        max_epochs = 1000,
         criterion = nn.L1Loss,
         x_dim = 11, 
         y_dim = 11,
@@ -32,7 +32,7 @@ if __name__ == "__main__":
         label_len = 12,
         out_len = 1,
 
-        close_len = 42,
+        close_len = 16,
         period_len = 6,
         trend_len = 0,
     )
@@ -59,9 +59,9 @@ if __name__ == "__main__":
         )
     else:
         model = Informer(
-            enc_in = 900,
-            dec_in = 900,
-            c_out = 900,
+            enc_in = 400,
+            dec_in = 400,
+            c_out = 400,
             seq_len = p['close_len'],
             label_len = p['label_len'],
             out_len = p['out_len'],
@@ -82,9 +82,10 @@ if __name__ == "__main__":
         )
         
     # model = Informer.load_from_checkpoint("milanST/36jlvz18/checkpoints/epoch=105-step=1788749.ckpt")
-    wandb_logger = WandbLogger(project="milanST")
+    wandb_logger = WandbLogger(project="MilanPredict", name='informer')
     wandb_logger.experiment.config["exp_tag"] = "Informer_{}".format('SW' if IS_SW else 'FG')
     wandb_logger.experiment.config.update(p, allow_val_change=True)
+
     lr_monitor = LearningRateMonitor(logging_interval='step')
     trainer = Trainer(
         max_epochs=p['max_epochs'],
@@ -92,10 +93,10 @@ if __name__ == "__main__":
         check_val_every_n_epoch=1,
         num_sanity_val_steps=0,
         logger=wandb_logger,
-        gpus=1,
+        devices=1,
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=10)]
     )
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)
-    trainer.predict(model, datamodule=dm)
+    # trainer.predict(model, datamodule=dm)

@@ -3,7 +3,7 @@ from fix_path import fix_python_path_if_working_locally
 fix_python_path_if_working_locally()
 
 from datasets import MilanFG
-from models import DeDenseNet
+from models.DeDenseNet import DeDenseNet
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -14,11 +14,11 @@ from torch import nn
 if __name__ == "__main__":
 
     seed_everything(42)
-    for tele_col in ['sms', 'call', 'internet']:
+    for tele_col in ['internet']: # ['sms', 'call', 'internet']: #
         p = dict(
             # dataset
             time_range = 'all',
-            aggr_time = 'hour',
+            aggr_time = None,
             tele_col = tele_col,
             grid_range = (41, 60, 41, 60),
 
@@ -26,9 +26,9 @@ if __name__ == "__main__":
             batch_size = 32,
             learning_rate = 1e-3,
     
-            max_epochs = 500,
+            max_epochs = 200,
             criterion = nn.L1Loss,
-            close_len = 96,
+            close_len = 16,
             period_len = 0,
             trend_len = 0,
             pred_len = 1,
@@ -59,9 +59,11 @@ if __name__ == "__main__":
             time_range=p['time_range'],
             tele_column=p['tele_col'],
         )
+
         model = DeDenseNet(
             learning_rate = p['learning_rate'],
             channels = p['close_len'],
+            pred_len = p['pred_len'],
 
             layers_s = p['layers_s'],
             growth_rate_s = p['growth_rate_s'],
@@ -77,20 +79,20 @@ if __name__ == "__main__":
             kernel_size = p['kernel_size'],
         )
 
-        # wandb_logger = WandbLogger(project="milanST",
-        #     name=f"STDense_in{p['close_len']}_out{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}")
-        # wandb_logger.experiment.config["exp_tag"] = "stDenseNet"
-        # wandb_logger.experiment.config.update(p)
+        wandb_logger = WandbLogger(project = "MilanPredict",
+                                   name = "DeDense")
+        wandb_logger.experiment.config["exp_tag"] = "DeDenseNet"
+        wandb_logger.experiment.config.update(p, allow_val_change=True)
+
         lr_monitor = LearningRateMonitor(logging_interval='step')
         trainer = Trainer(
             log_every_n_steps=1,
             check_val_every_n_epoch=1,
             max_epochs=p['max_epochs'],
-            # logger=wandb_logger,
-            gpus=1,
+            logger=wandb_logger,
+            devices=1,
             callbacks=[lr_monitor, 
-                        EarlyStopping(monitor='val_loss', patience=15)
-                        ]
+                        EarlyStopping(monitor='val_loss', patience=15)]
         )    
         # trainer.logger.experiment.save('models/STDenseNet.py')
 

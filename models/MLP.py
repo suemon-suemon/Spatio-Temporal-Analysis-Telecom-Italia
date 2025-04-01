@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from torch import nn
-
 from models.STBase import STBase
 
 
@@ -22,7 +21,9 @@ class MLP(STBase):
                                  nn.Linear(mlp_dim, pred_len))
 
     def forward(self, img):
-        img = img.squeeze(1)
+        # input.shape: [64, 64, 1, 20, 20]
+        img = img.squeeze(2) # [64, 64, 20, 20]
+        # print('img shape: ', img.shape)
         x = rearrange(img, 'b s h w -> b h w s')
         x = self.MLP(x)
         x = rearrange(x, 'b h w s -> b s h w')

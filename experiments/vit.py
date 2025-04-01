@@ -18,7 +18,7 @@ if __name__ == "__main__":
     p = dict(
         # dataset
         time_range = 'all',
-        aggr_time = 'hour',
+        aggr_time = None,
         tele_col = 'internet',
         compare_mvstgn = False,
         grid_range = (41, 60, 41, 60),
@@ -95,14 +95,14 @@ if __name__ == "__main__":
         pred_len=p['pred_len'],
     )
 
-    # wandb_logger = WandbLogger(
-    #     name=f"vit_{'hr' if p['aggr_time']=='hour' else 'min'}_{p['tele_col']}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}", 
-    #     project="milanST",
-    #     # version='st1nzjid',
-    #     # resume=True,
-    # )
-    # wandb_logger.experiment.config["exp_tag"] = "ViT"
-    # wandb_logger.experiment.config.update(p, allow_val_change=True)
+    wandb_logger = WandbLogger(
+        name=f"vit_{'hr' if p['aggr_time']=='hour' else 'min'}_{p['tele_col']}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}",
+        project="MilanPredict",
+        # version='st1nzjid',
+        # resume=True,
+    )
+    wandb_logger.experiment.config["exp_tag"] = "ViT"
+    wandb_logger.experiment.config.update(p, allow_val_change=True)
     # wandb.save('models/ViT.py')
     # wandb.save('models/ViT_matrix.py')
 
@@ -111,8 +111,8 @@ if __name__ == "__main__":
     trainer = Trainer(
         max_epochs=p['max_epochs'],
         log_every_n_steps=10,
-        # logger=wandb_logger,
-        gpus=1,
+        logger=wandb_logger,
+        devices=1,
         callbacks=[lr_monitor, checkpoint_callback, EarlyStopping(patience=15, monitor="val_loss")],
     )
     

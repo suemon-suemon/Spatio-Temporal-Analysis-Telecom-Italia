@@ -34,6 +34,7 @@ class TokenEmbedding(nn.Module):
                 nn.init.kaiming_normal_(m.weight,mode='fan_in',nonlinearity='leaky_relu')
 
     def forward(self, x):
+        x = x.to(torch.float32)  # ✅ 强制转换为 float32
         x = self.tokenConv(x.permute(0, 2, 1)).transpose(1,2)
         return x
 

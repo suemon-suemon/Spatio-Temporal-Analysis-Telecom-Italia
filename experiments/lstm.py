@@ -20,10 +20,10 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = '30days',
+        time_range = 'all',
         aggr_time = None,
-        tele_col = 'callout',
-        batch_size = 512,
+        tele_col = 'internet',
+        batch_size = 32, # so big
         learning_rate = 1e-4,
         
         # model trainer
@@ -65,15 +65,16 @@ if __name__ == "__main__":
         window_size=p['window_size'],
     )
 
-    # wandb_logger = WandbLogger(project="milanST",
-    #     name=f"LSTM_{p['close_len']}_{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}_{p['tele_col']}")
-    # wandb_logger.experiment.config["exp_tag"] = "LSTM"
-    # wandb_logger.experiment.config.update(p, allow_val_change=True)
+    wandb_logger = WandbLogger(project="MilanPredict",
+        name=f"LSTM_{p['close_len']}_{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}_{p['tele_col']}")
+    wandb_logger.experiment.config["exp_tag"] = "LSTM"
+    wandb_logger.experiment.config.update(p, allow_val_change=True)
+
     lr_monitor = LearningRateMonitor(logging_interval='step')
     trainer = Trainer(
         max_epochs=p['max_epochs'],
-        # logger=wandb_logger,
-        gpus=1,
+        logger = wandb_logger,
+        devices = 1,
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
     )
 

@@ -145,6 +145,8 @@ class DeDenseNet(STBase):
         self.trend = DenseNetUnit(self.channels_close, 1, layers_t, growth_rate_t, num_init_features_t, bn_size_t, drop_rate)
 
     def forward(self, x):
+        # Batch X 形状为 (batch_size, close_len, services, n_grid_row, n_grid_col)
+        # Batch Y 形状为 (batch_size, pred_len, services, n_grid_row, n_grid_col)
         x = x.squeeze(2)
         # seasonal_init = x
         seasonal_init, trend_init = self.decompsition(x.view(x.size(0), x.size(1), -1))

@@ -15,10 +15,11 @@ if __name__ == "__main__":
 
     seed_everything(42)
 
+    # pred_len 仅能是 1，改成其他数字就会报错
     p = dict(
         # dataset
         time_range = 'all',
-        aggr_time = 'hour',
+        aggr_time = '10min',
         tele_col = 'internet',
 
         normalize = True,
@@ -27,10 +28,12 @@ if __name__ == "__main__":
 
         max_epochs = 100,
         criterion = nn.L1Loss,
-        close_len = 3,
-        period_len = 3,
+        close_len = 128,  # 3
+        period_len = 0,  # 3
         trend_len = 0,
-        pred_len = 1,
+        pred_len = 32,  # 1
+
+        show_fig = False,
     )
 
     dm = MilanFG(
@@ -47,21 +50,23 @@ if __name__ == "__main__":
     model = STDenseNet(
         learning_rate = p['learning_rate'],
         channels = [p['close_len'], p['period_len'], p['trend_len']],
+        show_fig = p['show_fig'],
     )
 
-    # wandb_logger = WandbLogger(project="milanST",
-    #     name=f"STDense_in{p['close_len']}_out{p['pred_len']}_{'hr' if p['aggr_time'] == 'hour' else 'min'}_{p['time_range']}")
-    # wandb_logger.experiment.config["exp_tag"] = "stDenseNet"
-    # wandb_logger.experiment.config.update(p)
+    wandb_logger = WandbLogger(project="MilanPredict",
+        name=f"STDense_128_32")
+    wandb_logger.experiment.config["exp_tag"] = "stDenseNet"
+    wandb_logger.experiment.config.update(p)
+
     lr_monitor = LearningRateMonitor(logging_interval='step')
     trainer = Trainer(
         log_every_n_steps=1,
         check_val_every_n_epoch=1,
         max_epochs=p['max_epochs'],
-        # logger=wandb_logger,
-        gpus=1,
+        logger=wandb_logger,
+        devices=1,
         callbacks=[lr_monitor, 
-                    # EarlyStopping(monitor='val_loss', patience=100, verbose=True)
+                    EarlyStopping(monitor='val_loss', patience=10, verbose=True)
                     ]
     )    
     # trainer.logger.experiment.save('models/STDenseNet.py')

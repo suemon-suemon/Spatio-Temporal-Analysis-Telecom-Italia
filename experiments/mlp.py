@@ -17,19 +17,19 @@ if __name__ == "__main__":
     p = dict(
         # dataset
         time_range = 'all',
-        aggr_time = 'hour',
+        aggr_time = None,
         tele_col = 'internet',
         batch_size = 64,
         learning_rate = 1e-4,
-        normalize = False,
+        normalize = True,
         
         # model trainer
         max_epochs = 1000,
         criterion = nn.L1Loss,
-        close_len = 12,
+        close_len = 128,
         period_len = 0,
-        pred_len = 1,
-        mlp_dim = 256,
+        pred_len = 32,
+        mlp_dim = 512,
     )
 
     model = MLP(
@@ -51,18 +51,20 @@ if __name__ == "__main__":
         pred_len=p['pred_len'],
     )
 
-    wandb_logger = WandbLogger(name=f"MLP_{'hr' if p['aggr_time']=='hour' else 'min'}_in{p['close_len']}+{p['period_len']}_pred{p['pred_len']}_{p['tele_col']}", 
-                               project="milanST")
+    wandb_logger = WandbLogger(name = "MLP_128_32",
+                               project="MilanPredict")
     wandb_logger.experiment.config["exp_tag"] = "MLP"
     wandb_logger.experiment.config.update(p, allow_val_change=True)
+
     lr_monitor = LearningRateMonitor(logging_interval='step')
+
     trainer = Trainer(
         max_epochs=p['max_epochs'],
-        logger=wandb_logger,
-        gpus=1,
+        logger = wandb_logger,
+        devices = 1,
         callbacks=[lr_monitor, EarlyStopping(monitor='val_loss', patience=20)]
     )
-    trainer.logger.experiment.save('models/MLP.py')
+    # trainer.logger.experiment.save('models/MLP.py')
 
     trainer.fit(model, dm)
     trainer.test(model, datamodule=dm)

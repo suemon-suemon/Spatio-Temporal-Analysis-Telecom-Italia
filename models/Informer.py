@@ -89,7 +89,8 @@ class Informer(STBase):
         
         y = y[:,-self.pred_len:,:]
         y_hat = self(x, x_mark, dec_inp, y_mark)
-        return y_hat, y
+        extra_loss = 0.0
+        return y_hat, y, extra_loss
     
 
 class InformerStack(nn.Module):

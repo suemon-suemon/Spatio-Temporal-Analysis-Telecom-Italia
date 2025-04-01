@@ -70,12 +70,13 @@ if __name__ == "__main__":
         parser.add_argument('--method', help='baseline method', default='HI')
         args = parser.parse_args()
         time_range = 'all'
-        aggr_time = 'hour'
+        aggr_time = None
 
         ## prepare data
         milan = Milan(time_range=time_range, aggr_time=aggr_time, tele_column=tele_col)
         milan.prepare_data()
         milan.setup()
+
         milan_train = np.concatenate((milan.milan_train, milan.milan_val), axis=0)
         milan_test = milan.milan_test
         milan_train = milan_train.reshape((milan_train.shape[0], -1))
@@ -85,8 +86,8 @@ if __name__ == "__main__":
         print("Shape of train: {}, test: {}.".format(milan_train.shape, milan_test.shape))
         n_series = milan_train.shape[1]
         test_len = milan_test.shape[0]
-        in_len = 1
-        pred_len = 1
+        in_len = 64
+        pred_len = 16
 
         gt = np.stack([milan_test[in_len+i:in_len+i+pred_len] for i in range(milan_test.shape[0]-in_len-pred_len+1)], axis=0)
 
