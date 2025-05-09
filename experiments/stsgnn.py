@@ -3,10 +3,9 @@ import wandb
 fix_python_path_if_working_locally()
 import torch
 from torch import nn
-
 from datetime import datetime
-from datasets.Milan import MilanDataset
-from models.MyWAT import MySingleWAT, MyDualWAT
+from datasets import MilanFG
+from models.STSGNN import STSGNN
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -20,9 +19,9 @@ if __name__ == "__main__":
     p = dict(
         show_fig = True,
         show_intermediate_results = True,
-        log_run_name='WAT_Single_SmoothG_6_3',
+        log_run_name='stsgnn_6_3',
         log_project_name="MilanPredict",
-        log_run_tag=["Smooth Graph",
+        log_run_tag=["grid Gs", "toeplitz Gt"
                      "6->3"],
         time_now=timestamp,
 
@@ -39,7 +38,6 @@ if __name__ == "__main__":
         period_len = 0,
         trend_len = 0,
         pred_len = 3,
-        time_basis_number = 4,
         )
 
     # 先用 `wandb.init()` 初始化 WandB
@@ -56,8 +54,8 @@ if __name__ == "__main__":
     # 创建 `WandbLogger`，复用 `wandb` 运行实例
     wandb_logger = WandbLogger(experiment=wandb.run)
 
-    dm = MilanDataset(
-        format='mywat',
+    dm = MilanFG(
+        format='stsgnn',
         batch_size = p['batch_size'],
         close_len = p['close_len'],
         period_len = p['period_len'],
@@ -68,13 +66,12 @@ if __name__ == "__main__":
         time_range = p['time_range'],
         )
 
-    model = MySingleWAT(
-                  N = dm.N_all,
-                  input_time_steps = p['close_len'],
-                  K = p['time_basis_number'],
-                  L = p['pred_len'],
-                  show_fig = p['show_fig'],
-                  show_intermediate_results = p['show_intermediate_results'],
+    model = STSGNN(
+                num_nodes = dm.N_all,  # 节点数
+                input_dim = 1, # 输入业务种类数
+                horizon = p['close_len'],
+                output_window = p['pred_len'],
+                output_dim = 1, # 输出业务种类数
                  )
 
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -95,5 +92,4 @@ if __name__ == "__main__":
 
     torch.autograd.set_detect_anomaly(True)  # ✅ 全局启用梯度异常检测
     trainer.fit(model, dm)
-    trainer.test(model, datamodule=dm)
-    trainer.predict(model, datamodule=dm)
+    trainer.test(model, dm)

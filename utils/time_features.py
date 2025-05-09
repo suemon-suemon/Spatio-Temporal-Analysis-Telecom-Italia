@@ -1,9 +1,10 @@
 from typing import List
-
 import numpy as np
 import pandas as pd
 from pandas.tseries import offsets
 from pandas.tseries.frequencies import to_offset
+from tensorflow.python.framework.errors_impl import UnimplementedError
+
 
 class TimeFeature:
     def __init__(self):
@@ -111,41 +112,127 @@ def time_features_from_frequency_str(freq_str: str) -> List[TimeFeature]:
     """
     raise RuntimeError(supported_freq_msg)
 
-def time_features(dates, timeenc=1, freq='h'):
-    """
-    > `time_features` takes in a `dates` dataframe with a 'dates' column and extracts the date down to `freq` where freq can be any of the following if `timeenc` is 0: 
-    > * m - [month]
-    > * w - [month]
-    > * d - [month, day, weekday]
-    > * b - [month, day, weekday]
-    > * h - [month, day, weekday, hour]
-    > * t - [month, day, weekday, hour, *minute]
-    > 
-    > If `timeenc` is 1, a similar, but different list of `freq` values are supported (all encoded between [-0.5 and 0.5]): 
-    > * Q - [month]
-    > * M - [month]
-    > * W - [Day of month, week of year]
-    > * D - [Day of week, day of month, day of year]
-    > * B - [Day of week, day of month, day of year]
-    > * H - [Hour of day, day of week, day of month, day of year]
-    > * T - [Minute of hour*, hour of day, day of week, day of month, day of year]
-    > * S - [Second of minute, minute of hour, hour of day, day of week, day of month, day of year]
 
-    *minute returns a number from 0-3 corresponding to the 15 minute period it falls into.
+def get_time_features(
+        timestamps,
+        timeenc = 1,
+        freq = 'h',
+        time_feature_period = True,
+        aggr_time='10min',
+        holidays = None
+):
     """
-    if timeenc==0:
-        dates['month'] = dates.date.apply(lambda row:row.month,1)
-        dates['day'] = dates.date.apply(lambda row:row.day,1)
-        dates['weekday'] = dates.date.apply(lambda row:row.weekday(),1)
-        dates['hour'] = dates.date.apply(lambda row:row.hour,1)
-        dates['minute'] = dates.date.apply(lambda row:row.minute,1)
-        dates['minute'] = dates.minute.map(lambda x:x//15)
+    通用版时间特征提取。
+
+    参数:
+      - timestamps: pd.Series or np.ndarray of datetime
+      - timeenc: 是否标准时间编码
+      - freq: 时间粒度 'h', 't', 'm'...
+      - time_feature_period: 是否使用周期型 sin/cos 编码
+      - aggr_time: 'hour', '10min' 等，用于step_of_day计算
+      - holidays: 自定义节假日列表
+
+    返回:
+      - if timeenc == 0 and freq='h': (T, 4) ndarray, 保留原数值，没有编码
+      - if timeenc == 1 and freq='h': (T, 4) ndarray, 每个数值都编码到了[-0.5, 0.5]
+      - if timeenc == 2 and time_feature_period == True: (T, 9) ndarray
+      - if timeenc == 2 and time_feature_period == False: (T, 6) ndarray
+
+    """
+    if isinstance(timestamps, np.ndarray):
+        timestamps = pd.to_datetime(timestamps)
+
+    # 基础时间字段
+    month = timestamps.month
+    day_of_week = timestamps.dayofweek
+    hour = timestamps.hour
+    minute = timestamps.minute
+
+    if aggr_time == 'hour':
+        step_of_day = hour
+        steps_per_day = 24
+    elif aggr_time == '10min' or aggr_time is None:
+        step_of_day = hour * 6 + minute // 10
+        steps_per_day = 144
+    elif aggr_time == '5min':
+        step_of_day = hour * 12 + minute // 5
+        steps_per_day = 288
+    else:
+        raise UnimplementedError('aggr_time is not supported')
+
+    # 判断是否凌晨
+    is_midnight = ((hour >= 1) & (hour <= 6)).astype(int)
+    is_weekend = (day_of_week >= 5).astype(int)
+
+    # 节假日
+    if holidays is not None:
+        is_holiday = timestamps.strftime('%Y-%m-%d').isin(holidays).astype(int)
+    else:
+        is_holiday = np.zeros(len(timestamps), dtype=int)
+
+    if timeenc == 0:
+        # 传统简单版
+        df = pd.DataFrame({
+            'month': month,
+            'day': timestamps.day,
+            'weekday': day_of_week,
+            'hour': hour,
+            'minute': (minute // 15),
+        })
+
         freq_map = {
-            'y':[],'m':['month'],'w':['month'],'d':['month','day','weekday'],
-            'b':['month','day','weekday'],'h':['month','day','weekday','hour'],
-            't':['month','day','weekday','hour','minute'],
+            'y': [],
+            'm': ['month'],
+            'w': ['month'],
+            'd': ['month', 'day', 'weekday'],
+            'b': ['month', 'day', 'weekday'],
+            'h': ['month', 'day', 'weekday', 'hour'],
+            't': ['month', 'day', 'weekday', 'hour', 'minute'],
         }
-        return dates[freq_map[freq.lower()]].values
-    if timeenc==1:
-        dates = pd.to_datetime(dates.values)
+        return df[freq_map[freq.lower()]].values
+
+    elif timeenc == 1: # one-hot 编码
+        dates = pd.to_datetime(timestamps.values)
         return np.vstack([feat(dates) for feat in time_features_from_frequency_str(freq)]).transpose(1,0)
+
+    elif timeenc == 2:
+        if time_feature_period:
+            # 周期型（sin/cos编码 + 二进制特征）
+            sin_month = np.sin(2 * np.pi * month / 12)
+            cos_month = np.cos(2 * np.pi * month / 12)
+
+            sin_day_of_week = np.sin(2 * np.pi * day_of_week / 7)
+            cos_day_of_week = np.cos(2 * np.pi * day_of_week / 7)
+
+            sin_step_of_day = np.sin(2 * np.pi * step_of_day / steps_per_day)
+            cos_step_of_day = np.cos(2 * np.pi * step_of_day / steps_per_day)
+
+            return np.stack([
+                sin_month, cos_month,
+                sin_day_of_week, cos_day_of_week,
+                sin_step_of_day, cos_step_of_day,
+                is_midnight, is_weekend, is_holiday
+            ], axis=-1)  # (T, 9)
+        else:
+            # 直接数值型时间特征
+            return np.stack([
+                month, day_of_week, step_of_day,
+                is_midnight, is_weekend, is_holiday
+            ], axis=-1)  # (T, 6)
+    else:
+        raise UnimplementedError('timeenc is not supported')
+
+
+if __name__ == '__main__':
+    timestamps = pd.date_range('2023-04-01 00:00', '2023-05-02 00:00', freq='5H')
+    # dates = pd.DataFrame({'date': timestamps})
+    time_feature = get_time_features(
+        timestamps,
+        timeenc=0,
+        freq='h',
+        time_feature_period=True,
+        aggr_time='10min',
+        holidays=None
+    )
+    print('time feature shape', time_feature.shape)
+    print(time_feature)

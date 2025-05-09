@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
-
+from utils.registry import register
 from models.informer.encoder import Encoder, EncoderLayer, ConvLayer, EncoderStack
 from models.informer.decoder import Decoder, DecoderLayer
 from models.informer.attn import FullAttention, ProbAttention, AttentionLayer
 from models.informer.embed import DataEmbedding
 from models.STBase import STBase
 
+@register('Informer')
 class Informer(STBase):
     def __init__(self, enc_in, dec_in, c_out, seq_len, label_len, out_len, 
                 factor=5, d_model=512, n_heads=8, e_layers=3, d_layers=2, d_ff=512, 

@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     p = dict(
         # dataset
-        time_range = '30days',
+        time_range = 'all',
         aggr_time = None,
         tele_col = 'callout',
         batch_size = 1024,

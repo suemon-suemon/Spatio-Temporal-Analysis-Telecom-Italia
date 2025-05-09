@@ -4,9 +4,8 @@ from fix_path import fix_python_path_if_working_locally
 fix_python_path_if_working_locally()
 import torch
 import numpy as np
-from datasets.Milan import MilanDataset
-from datasets.Taiwan import TaiwanDataset
-from models.LightSTGCN import LightSTGCN
+from datasets import MilanFG
+from models.SimpleSTGCN import SimpleSTGCN
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -29,7 +28,7 @@ if __name__ == "__main__":
         feature_len = 64,
         cheb_k = 2,
 
-        max_epochs = 100,
+        max_epochs = 1000,
         criterion = nn.L1Loss,
         close_len = 6,
         pred_len = 3,
@@ -37,7 +36,7 @@ if __name__ == "__main__":
         trend_len = 0,
     )
 
-    dm = MilanDataset(
+    dm = MilanFG(
         format='stgcn',
         batch_size=p['batch_size'],
         close_len=p['close_len'],
@@ -49,7 +48,7 @@ if __name__ == "__main__":
         time_range=p['time_range'],
     )
 
-    model = LightSTGCN(
+    model = SimpleSTGCN(
         close_len = p['close_len'],
         pred_len = p['pred_len'],
         feature_len = p['feature_len'],
@@ -58,8 +57,8 @@ if __name__ == "__main__":
 
     timestamp = datetime.now().strftime("%m%d%H%M")  # 例如：03181530
     wandb_logger = WandbLogger(project="MilanPredict",
-                            name="LightSTGCN_LowPassG_GCN_6_3",
-                            id=f"{'LightSTGCN_LowPassG_GCN_6_3'}_{timestamp}", )
+                            name="SimpleSTGCN_GridGs_LPGt_GCN_6_3",
+                            id=f"{'SimpleSTGCN_GridGs_LPGt_GCN_6_3'}_{timestamp}", )
     wandb_logger.experiment.config["exp_tag"] = ["lightstgcn"]
     wandb_logger.experiment.config.update(p, allow_val_change=True)
 

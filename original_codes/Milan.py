@@ -5,15 +5,15 @@ import subprocess
 import h5py
 import numpy as np
 import pandas as pd
+from urllib.parse import urlsplit
 from networkx import adjacency_matrix
 from networkx.generators import grid_2d_graph
 from pytorch_lightning import LightningDataModule
 from sklearn.preprocessing import MinMaxScaler
 
-
 class Milan(LightningDataModule):
     def __init__(self,
-                 data_dir: str = '/data/scratch/jiayin',
+                 data_dir: str = '/data/scratch/jiayin/milan',
                  download_json_name: str = 'Milan_telecom_urls.json',
                  grid_range: tuple = (41, 60, 41, 60),
                  aggr_time = None,
@@ -22,25 +22,30 @@ class Milan(LightningDataModule):
                  normalize: bool = True,
                  tele_column: str = 'internet',
                  time_range: str = 'all',
+                 time_feature_period: bool = True,
+                 remove_last_ten_days: bool = True, # 是否去掉最后10天数据，因为最后10天的数值比较高
                  compare_mvstgn: bool = False,
-                 load_meta: bool = True,
-                 impute_missing: bool = True,
+                 load_meta: bool = True, # self.meta [4, 100, 100], 节点特征
+                 impute_missing: bool = True, # 补上 nan 值
                  ):
         super(Milan, self).__init__()
         self.compare_mvstgn = compare_mvstgn
         self.load_meta = load_meta
-        self.meta_file_name = 'crawled_feature.csv'
+        self.meta_file_name = 'cell_feature.csv' #'crawled_feature.csv'
         self.meta = None  # 默认初始化 meta 属性
         self.impute_missing = impute_missing
+        self.remove_last_ten_days = remove_last_ten_days
         self.download_json_name = download_json_name
         self.aggr_time = aggr_time
+        self.time_feature_period = time_feature_period # 时间特征是否取sin/cos
+        self.times_feature = None  # 存储day_of_week和step_of_day的ndarray
         self.N_all = (grid_range[1] - grid_range[0] + 1) * (grid_range[3] - grid_range[2] + 1)
         self.train_ratio = 0.8
         self.val_ratio = 0.1
         self.test_ratio = 0.1
 
-        if tele_column not in ['internet', 'call', 'callin', 'callout', 'sms', 'smsin', 'smsout', 'sms2', 'call2']:
-            raise ValueError('tele_column must be one of internet, call, callin, callout, sms, smsin, smsout')
+        if tele_column not in ['internet', 'call', 'callin', 'callout', 'sms', 'smsin', 'smsout', 'sms2', 'call2','all']:
+            raise ValueError('tele_column must be one of internet, call, callin, callout, sms, smsin, smsout, all')
         self.tele_column = tele_column
 
         self.time_range = time_range
@@ -59,7 +64,17 @@ class Milan(LightningDataModule):
             self.n_rows = grid_range[1] - grid_range[0] + 1
             self.n_cols = grid_range[3] - grid_range[2] + 1
         self.n_grids = self.n_rows * self.n_cols
+
+        # 邻接矩阵是2d网格图
         self.adj_mx = adjacency_matrix(grid_2d_graph(self.n_rows, self.n_cols))
+
+        # 计算每天的时间步steps_per_day
+        if self.aggr_time == 'hour': # 如果数据聚合时间为 'hour'
+            self.steps_per_day = 24 # 每天有24个数据点
+        elif self.aggr_time == '10min' or self.aggr_time is None: # 如果数据聚合时间为 '10min'
+            self.steps_per_day = 144 # 每天有144个时间步 (24小时 * 6)
+        else:
+            raise ValueError("aggr_time must be 'hour' or '10min'")
 
         self.normalize = normalize
         self.scaler = None
@@ -91,22 +106,6 @@ class Milan(LightningDataModule):
         test_len = self.T - train_len - val_len
         return train_len, val_len, test_len
 
-    # @staticmethod
-    # def get_default_len(time_range) -> dict:
-    #     # return train, val and test length
-    #     if time_range == '30days':
-    #         tvt = (16, 7, 7)
-    #         return (i * 24 * 6 for i in tvt)
-    #         # return {'val': {'year': 2013, 'month': 11, 'day': 18},
-    #         #         'test': {'year': 2013, 'month': 11, 'day': 21},
-    #         #         'end': {'year': 2013, 'month': 12, 'day': 1}}
-    #     else:
-    #         tvt = (48, 7, 7)
-    #         return (i * 24 for i in tvt)
-    #         # return {'val': {'year': 2013, 'month': 12, 'day': 16},  # 10 | 13 | 19
-    #         #         'test': {'year': 2013, 'month': 12, 'day': 23}, # 14 | 23 | 26
-    #         #         'end': {'year': 2014, 'month': 1, 'day': 2}}    # 24 |  2 |  2
-
     @staticmethod
     def _load_telecom_data(path):
         print("loading data from file: {}".format(path))
@@ -118,17 +117,11 @@ class Milan(LightningDataModule):
         data.drop(['countrycode'], axis=1, inplace=True)
         return data
 
-    # original version：
-    # @staticmethod
-    # def _load_telecom_data(path):
-    #     print("loading data from file: {}".format(path))
-    #     data = pd.read_csv(path, header=0, index_col=0)
-    #     data = data.groupby(['cellid', 'time'], as_index=False).sum()
-    #     data.drop(['countrycode'], axis=1, inplace=True)
-    #     return data
-
     def download_data(self):
-        # json文件中存储了网页上扒下来的url下载链接
+        # 从json中读取url，下载txt。
+        # 注意json中url与name不对应，所以不要根据json的name为文件命名。
+        # 仅下载url，保持原名就是正确的。
+
         # 设置保存文件的目标目录
         target_dir = self.data_dir
         download_json_name = self.download_json_name
@@ -139,22 +132,26 @@ class Milan(LightningDataModule):
             file_list = json.load(f)
 
         for file_obj in file_list:
-            # 提取文件名和下载链接
-            file_name = file_obj.get("name")
+            # 提取下载链接
             content_url = file_obj.get("contentUrl")
 
-            if file_name and content_url:
+            if content_url:
                 # 构造保存路径
-                save_path = os.path.join(target_dir, file_name)
-                # 构造 curl 命令
-                cmd = ["curl", "-L", content_url, "-o", save_path]
-                print(f"Downloading {file_name} ...")
+                os.chdir(target_dir)  # 切换到目标目录
+
+                # 使用 curl 进行下载，-O 表示使用 URL 中的文件名保存文件
+                cmd = ["curl", "-L", content_url, "-O"]
+                print(f"Downloading {content_url} ...")
                 subprocess.run(cmd, check=True)
             else:
-                print("缺少文件名或下载链接:", file_obj)
+                print("缺少下载链接:", file_obj)
 
     def prepare_data(self):
-        # 处理 meta 文件
+
+        # 生成 milan 数据文件：milan_10min_T_N_5.h5  或 milan_hour_T_N_5.h5
+        # 最小时间间隔就是10min，一般常用的聚合间隔就是10min和1h。其他大于10min的聚合间隔也可以使用，此处不考虑。
+
+        # 生成 self.meta，即 crawled_feature.csv 中的基站特征数据
         if self.load_meta:
             meta_path = os.path.join(self.data_dir, self.meta_file_name)
             if not os.path.exists(meta_path):  # 如果meta-path文件路径不存在
@@ -163,12 +160,12 @@ class Milan(LightningDataModule):
                 print('{} already exists in {}'.format(self.meta_file_name, self.data_dir))
                 meta = pd.read_csv(meta_path, header=0)
                 meta = meta.values.T
-                self.meta = meta.reshape(-1, 100, 100)
+                self.meta = meta.reshape(-1, 100, 100) # [4,100,100]
 
         if self.compare_mvstgn:
             return  # use data_git_version.h5
 
-        # 生成milan 数据文件：milan_5min_T_N_5.h5  或 milan_5min_T_N_5.h5
+        # 生成milan 数据文件：milan_10min_T_N_5.h5  或 milan_hour_T_N_5.h5
         file_path = os.path.join(self.data_dir, self.file_name)
         column_names = ['cellid', 'time', 'countrycode', 'smsin', 'smsout', 'callin', 'callout', 'internet']
 
@@ -232,6 +229,8 @@ class Milan(LightningDataModule):
             print('{} already exists in {}'.format(self.file_name, self.data_dir))
 
     def setup(self, stage: Optional[str] = None) -> None:
+        # 提取业务，补全nan，归一化，移除最后10天的异常值，裁剪所需网格内的空间特征
+
         # 如果设置为加载元数据（meta），则对 meta 数据按照网格范围进行裁剪
         if self.load_meta:
             # 裁剪 meta 数据，使其只包含 grid_range 指定的区域
@@ -283,6 +282,8 @@ class Milan(LightningDataModule):
         self._load_data()
 
     def _load_data(self):
+        # 提取业务，补全nan，归一化，移除最后10天的异常值，计算时间特征，裁剪所需网格内的空间特征
+
         if hasattr(self, 'milan_grid_data'):
             return
 
@@ -293,8 +294,10 @@ class Milan(LightningDataModule):
 
         with h5py.File(filePath, 'r') as f:
             data = f['data'][:]  # shape (T_len, N_grids, 5)
-            self.T = data.shape[0] # 1413(hour) or 8496(10min)
             self.timestamps = pd.to_datetime(f['time'][:].astype(str), format='%Y-%m-%d %H:%M:%S')
+
+        # 产生时间特征
+        self._generate_time_feature()
 
         if self.tele_column == 'smsin':
             data = data[:, :, 0:1]
@@ -314,14 +317,25 @@ class Milan(LightningDataModule):
             data = data[:, :, 0:2]
         elif self.tele_column == 'call2':
             data = data[:, :, 2:4]
+        elif self.tele_column == 'all':
+            data = data[:, :, :] # 保留全部业务数据
         else:
             raise ValueError("{} is not a valid column".format(self.tele_column))
+        self.service_dim = data.shape[-1] # 业务种类数维度
 
         data = data.reshape(data.shape[0], 100, 100, -1).transpose((0, 3, 1, 2))
+        # 10min (8928, 1, 100, 100)
+        # hour (1488, 1, 100, 100)
+        if self.remove_last_ten_days:
+            steps_to_remove = 10 * self.steps_per_day
+            data = data[:-steps_to_remove]  # 从数据中移除最后十天的数据
+            self.T = data.shape[0]  # 1248(hour) or 7488(10min)
+
         if self.grid_range is not None:
             oridata = data
             data = data[:, :, self.grid_range[0] - 1:self.grid_range[1], self.grid_range[2] - 1:self.grid_range[3]]
 
+        # 补上 nan 数据，用周围9个节点的数据平均值
         for id in np.argwhere(np.isnan(data)):
             if self.impute_missing:
                 oriid = [id[0], id[1], id[2] + self.grid_range[0] - 1, id[3] + self.grid_range[2] - 1]
@@ -332,13 +346,79 @@ class Milan(LightningDataModule):
                 data[id[0], id[1], id[2], id[3]] = np.nanmean(surroundings)
             else:
                 data[id[0], id[1], id[2], id[3]] = 0
+
+        # minmax 归一化
         if self.normalize:
             self.scaler = MinMaxScaler((0, 1))
             data = self.scaler.fit_transform(data.reshape(-1, 1)).reshape(data.shape)
 
         # Input and parameter tensors are not the same dtype, found input tensor with Double and parameter tensor with Float
         self.milan_grid_data = data.astype(np.float32)
-        print("loaded data shape: ", data.shape)
+        print("setup data shape: ", data.shape)
+
+    def _generate_time_feature(self):
+        # 计算self.time_feature,
+        #  周期性的时间特征: [sin_month, cos_month,
+        #                   sin_day_of_week, cos_day_of_week,
+        #                   sin_step_of_day, cos_step_of_day,
+        #                   is_midnight, is_weekend, is_holiday]
+
+        # 非周期性的时间特征: [month, day_of_week, step_of_day,
+        #                   is_midnight, is_weekend, is_holiday]
+        month = self.timestamps.month # 几月份
+        sin_month = np.sin(2 * np.pi * month / 12) # 月份越接近 12，值越接近 1
+        cos_month = np.cos(2 * np.pi * month / 12)
+
+        day_of_week = self.timestamps.dayofweek  # 星期几（0 = 周一, 6 = 周日）
+        sin_day_of_week = np.sin(2 * np.pi * day_of_week / 7) # 周一和周日接近
+        cos_day_of_week = np.cos(2 * np.pi * day_of_week / 7)
+
+        hour = self.timestamps.hour
+        minute = self.timestamps.minute
+        if self.aggr_time == 'hour':
+            step_of_day = hour # 每小时一个时间步
+        elif self.aggr_time == '10min' or self.aggr_time is None:
+            step_of_day = hour * 6 + minute // 10 # 每10分钟一个时间步
+        sin_step_of_day = np.sin(2 * np.pi * step_of_day / self.steps_per_day)
+        cos_step_of_day = np.cos(2 * np.pi * step_of_day / self.steps_per_day)
+
+        is_midnight = (hour >= 1) & (hour <= 6) # 是否是凌晨时段 1am - 6am
+        is_weekend = day_of_week >= 5  # 1 if weekend, 0 otherwise
+
+        holidays = [
+            "2013-10-31",  # 万圣节
+            "2013-12-08",  # 圣母无原罪日
+            "2013-12-24",  # 平安夜
+            "2013-12-25",  # 圣诞节
+            "2013-12-26",  # 圣斯蒂芬日
+            "2014-01-01",  # 元旦
+        ]
+        is_holiday = self.timestamps.isin(holidays).astype(int)
+        # 1 if holiday, 0 otherwise
+
+        # 拼接返回 self.times_feature
+        if self.time_feature_period:
+            #  (T, 9) 形状的 ndarray
+            self.times_feature = np.column_stack((
+                sin_month, cos_month,
+                sin_day_of_week, cos_day_of_week,
+                sin_step_of_day, cos_step_of_day,
+                is_midnight, is_weekend, is_holiday
+            ))
+        else:
+            # (T, 6) 形状的 ndarray
+            self.times_feature = np.column_stack((
+                month, day_of_week, step_of_day,
+                is_midnight, is_weekend, is_holiday
+            ))
+
+        # 移除最后十天的数据 (optional)
+        if self.remove_last_ten_days:
+            steps_to_remove = 10 * self.steps_per_day
+            self.times_feature = self.times_feature[:-steps_to_remove]
+
+        return self.times_feature
+
 
     def train_dataloader(self):
         raise NotImplementedError
@@ -366,11 +446,12 @@ def get_indexes_of_train(format, time_level, out_start_idx, close_len, period_le
     pred_len (int, optional): 预测的时间步数，默认为1。
 
     返回：
-    indices (list): 训练数据的索引列表。
+    indices (list): 训练数据的索引列表，从早到晚排列。
 
     功能：
-    - 根据不同的时间级别（小时或每10分钟）计算一天的时间步数（24小时或24小时*6）。
-    - 根据数据格式 'default' 或 'sttran' 生成训练数据的索引。'default' 格式会生成历史数据索引并加上周期性和趋势性的数据，'sttran' 格式主要用于时序变换模型，生成带有历史时间步的索引。
+    - 根据数据格式 'default' 或 'sttran' 生成训练数据的索引。
+    - 'default' 格式会生成历史数据索引并加上周期性和趋势性的数据，
+    - 'sttran' 格式生成带有历史时间步的索引。
     """
     # 定义一天的时间步数，基于时间级别决定是24小时还是24*6个10分钟段
     if time_level == 'hour':
@@ -381,18 +462,25 @@ def get_indexes_of_train(format, time_level, out_start_idx, close_len, period_le
     indices = []  # 初始化索引列表
 
     # 'default'格式：使用历史数据以及周期性和趋势性的数据来生成索引
+    # close len：从当前时间步回溯 close_len 个时间步的数据索引
+    # period len：往前推几天，每天都取pred-len个数据点的索引
+    # trend len：往前推几周，每周都取pred-len个数据点的索引
+    # 当前是10， 推完是[9, 8, 7, 6, 5, // -12, -13, -14, -36, -37, -38, //-156, -157, -158]
     if format == 'default':
         # 首先加入从当前时间步开始，回溯close_len个时间步的数据
         indices += [out_start_idx - i - 1 for i in range(close_len)]
+        # e.g. [9, 8, 7, 6, 5]。
 
-        # 如果period_len大于0，加入周期性数据的索引（跨越多个天）
+        # 如果period_len大于0，加入周期性数据的索引（往前推几天，每周pred_len个点）
+        # period-len=2, pred-len=3: 推1天前的3个点+推两天前的3个点
         if period_len > 0:
             indices += [
                 out_start_idx - (i + 1) * TIME_STEPS_OF_DAY + (pred_len - j - 1)
                 for j in range(pred_len) for i in range(period_len)
             ]
 
-        # 如果trend_len大于0，加入趋势性数据的索引（跨越多个星期）
+        # 如果trend_len大于0，加入趋势性数据的索引（往前推几周，每周取pred-len个点）
+        # trend_len=1, pred-len=3: 推一周前的3个点
         if trend_len > 0:
             indices += [
                 out_start_idx - (i + 1) * TIME_STEPS_OF_DAY * 7 + (pred_len - j - 1)
@@ -400,6 +488,9 @@ def get_indexes_of_train(format, time_level, out_start_idx, close_len, period_le
             ]
 
     # 'sttran'格式：生成包含历史时间步的索引，适用于时序变换模型
+    # 往前推几天，每天取close_len个点
+    # 当前是10， 推完是[-14, -15, -16, -17, -18,// -38, -39, -40, -41, -42]
+    # 往前推几天，每天取close-len个点。不取当前时刻往前回溯的邻近数据点。
     elif format == 'sttran':
         if period_len > 0:
             indices += [
@@ -407,23 +498,22 @@ def get_indexes_of_train(format, time_level, out_start_idx, close_len, period_le
                 for j in range(close_len) for i in range(period_len)
             ]
 
-    # 将索引顺序反转
+    # 将索引顺序反转，返回从早到晚的indices索引
     indices.reverse()
 
     return indices
 
 # test
 if __name__ == '__main__':
-    milan = Milan(data_dir='/data/scratch/jiayin',
-                  download_json_name='Milan_telecom_urls.json',
+    milan = Milan(data_dir='/data/scratch/jiayin/milan',
                   aggr_time='10min',
                   time_range='all',
-                  tele_column='internet',
-                  grid_range=(41, 70, 41, 70),
                   load_meta=True)
     # milan.download_data()
     milan.prepare_data()
     milan.setup()
+    X = milan.milan_grid_data.squeeze().reshape(-1, milan.N_all)
+    print(np.argwhere(np.isnan(X)))
 
     # sms_milan_train = np.concatenate((milan.milan_train, milan.milan_val), axis=0)
     # sms_milan_test = milan.milan_test

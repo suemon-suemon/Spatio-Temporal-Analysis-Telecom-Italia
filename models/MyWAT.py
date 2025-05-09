@@ -1,13 +1,12 @@
 import io
+from PIL import Image
 import os
-
 import networkx as nx
 import wandb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
-from PIL import Image
 import pandas as pd
 from utils.funcs import *
 from models.modules import *
@@ -1063,19 +1062,17 @@ class GLBernVAEModule(nn.Module):
         return adj, loss_recon  # 返回重构结果和变分参数
 
 
-class MyWAT(STBase):
-    """整体模型：整合所有模块"""
+class MySingleWAT(STBase):
+    """仅有时域分解"""
 
     def __init__(self, N, input_time_steps, K, L,
                  Ks = 18,
                  *args, **kwargs):
-        super(MyWAT, self).__init__(*args, **kwargs)
+        super(MySingleWAT, self).__init__(*args, **kwargs)
         # self.graph_learning = GraphLearningModule_BernVAE(in_dim=input_time_steps, latent_dim=16, out_dim=1, N=N)
-        self.graph_learning = KNNGraphLearn(k_neighbors=3, return_adjacency_matrix=True)
+        # self.graph_learning = KNNGraphLearn(k_neighbors=3, return_adjacency_matrix=True)
         self.sparse_coding = SparseCodingModule(T=input_time_steps, K=K)
-        self.sparse_coding_spatial = SparseCodingSpatial(N=N, Ks=Ks)
         self.graphNN = GCN(in_dim=K, out_dim=K)
-        self.graphNN_spatial = GCN_spatial(in_dim=input_time_steps, out_dim=L)
         # self.graphNN = MultiHeadGAT(head_GAT=4, nhead_out=1,in_dim=K,out_dim=K, N=N)
         # self.linear_pre_coeff = LinearPreCoeff(in_dim=K, out_dim=K)
         self.basis_extraction = BasisExtractionModule(in_dim=input_time_steps, out_dim=L, temporal_basis_number=K)
@@ -1087,6 +1084,7 @@ class MyWAT(STBase):
 
         self.seq_len = input_time_steps
         self.N = N
+        self.sqrtN = int(N ** 0.5)
         self.K = K
         self.pred_len = L
         self.lambda_reconstruct = 0.02
@@ -1103,11 +1101,14 @@ class MyWAT(STBase):
 
         # 1. 图学习模块
         # A_unnorm = self.graph_learning(X) # [N, N]
-        A_unnorm = torch.eye(self.N, device = X.device)
+        A_unnorm = np.load("/data/scratch/jiayin/Adj_SmoothGL_Milan10Min_Internet.npy")
+        # A_unnorm = torch.eye(self.N, device = X.device)
+        # A_unnorm = nx.adjacency_matrix(nx.grid_2d_graph(self.sqrtN, self.sqrtN)) # grid graph
         # A_unnorm = nx.adjacency_matrix(nx.erdos_renyi_graph(self.N, 3.8/self.N, seed=42))
-        # A = Adj2EdgeList(A_unnorm) # edge index
+
+        A = Adj2EdgeList(A_unnorm, filter_small_values = True, print_warning = False) # edge index
         # A = normalize_adj_add_self_hoop(A_unnorm)
-        A = torch.ones(2, self.N, device = X.device).int()
+        # A = torch.ones(2, self.N, device = X.device).int()
 
         # 2. 稀疏编码模块
         C, D = self.sparse_coding(X) # C: [batch_size, N, K], D: [K, T]
@@ -1118,29 +1119,17 @@ class MyWAT(STBase):
         # 5. 预测模块
         X_pre_temporal = torch.matmul(C_pre, D_ext) # => [batch_size, N, L]
 
-        # 空间维度对称再来一遍
-        As = torch.ones(2, self.seq_len, device = X.device).int()
-        Cs, Ds = self.sparse_coding_spatial(X) # Cs: [batch_size, T, Ks], Ds: [Ks, N]
-        Cs_pre = self.graphNN_spatial(x=Cs, adj=As) # => [batch_size, L, Ks]
-        Ds_ext = self.linear_layer(Ds) # => [Ks, N]
-        X_pre_spatial = torch.matmul(Cs_pre, Ds_ext) # => [batch_size, L, N]
-        X_pre_spatial = X_pre_spatial.permute(0, 2, 1) # => [batch_size, N, L]
-
-        X_pre = 0.5 * X_pre_spatial + 0.5 * X_pre_temporal
+        X_pre = X_pre_temporal
 
         # 6. 计算各项损失
         reconstruct_loss = self.lambda_reconstruct * nn.MSELoss()(torch.matmul(C, D), X)
-        reconstruct_loss += self.lambda_reconstruct * nn.MSELoss()(torch.matmul(Cs, Ds), X.permute(0, 2, 1))
 
         loss_graph = self.lambda_graph_KL * BernKLDiv(A, prior=0.2)
         sparsity_loss = (self.lambda_sparse * (torch.abs(C).sum()) + self.lambda_sparse * (torch.abs(C_pre).sum()))
 
         D_gram_matrix = torch.matmul(D, D.T)
-        D_gram_spatial = torch.matmul(Ds, Ds.T)
         I_Dt = torch.eye(D.shape[0], device=D_gram_matrix.device)
-        I_Ds = torch.eye(Ds.shape[0], device=D_gram_spatial.device)
         D_orthogonality_loss = self.lambda_orthogonality * torch.norm(D_gram_matrix - I_Dt, p = 'fro')
-        D_orthogonality_loss += self.lambda_orthogonality * torch.norm(D_gram_spatial - I_Ds, p = 'fro')
 
         return {
             "X_pre": X_pre,
@@ -1160,7 +1149,6 @@ class MyWAT(STBase):
         """前向传播调用 `_compute_forward_results`"""
         results = self._compute_forward_results(X)
         return results["X_pre"], results["reconstruct_loss"] + results["D_orthogonality_loss"]
-
 
     def _log_intermediate_results(self, X):
         """记录 WAT 模型的中间结果到 WandB"""
@@ -1248,7 +1236,242 @@ class MyWAT(STBase):
         # 生成第二张图（C, C_pre 的 [0, :, 1], [0, :, 5], [0, :, 10]）
         fig_C, axes_C = plt.subplots(nrows=3, ncols=2, figsize=(12, 9))
 
-        cols_to_plot = [1, 5, 10]
+        cols_to_plot = [0, int(self.K/2), self.K-1] # [b, N, K]
+        for i, col in enumerate(cols_to_plot):
+            axes_C[i, 0].plot(C[0, :, col].cpu().detach().numpy(), label=f'C [0, :, {col}]')
+            axes_C[i, 0].grid(True)
+            axes_C[i, 0].set_title(f'C - [0, :, {col}]')
+            axes_C[i, 0].legend()
+
+            axes_C[i, 1].plot(C_pre[0, :, col].cpu().detach().numpy(), label=f'C_pre [0, :, {col}]')
+            axes_C[i, 1].grid(True)
+            axes_C[i, 1].set_title(f'C_pre - [0, :, {col}]')
+            axes_C[i, 1].legend()
+
+        plt.tight_layout()
+
+        # 存储至本地
+        c_ext_img_path = os.path.join(save_dir, "C_Cpre_plot.png")
+        fig_C.savefig(c_ext_img_path, format='png')
+        # 存储至wandb
+        img_buf_C = io.BytesIO()
+        plt.savefig(img_buf_C, format='png')
+        img_buf_C.seek(0)
+        img_C_pil = Image.open(img_buf_C)  # 转换为 PIL 图像
+        plt.close(fig_C)
+
+        wandb_logger.log({
+            "ImResult/WAT_D_D_ext": wandb.Image(img_D_pil),
+            "ImResult/WAT_C_C_pre": wandb.Image(img_C_pil),
+            "ImResult/WAT_Adjacency_Matrix (A)": wandb.Image(img_A_pil),
+        })
+
+        # ✅ 记录数值信息到 `wandb`
+        imresult_table = wandb.Table(columns=["Metric", "Value"],
+                                     data=[
+            ["Input_X_min", float(X.min().item())],
+            ["Input_X_max", float(X.max().item())],
+            ["Final_output_X_pre_min", float(X_pre.min().item())],
+            ["Final_output_X_pre_max", float(X_pre.max().item())],
+            ["GraphLearning_num_edge", int(torch.count_nonzero(A).item())],
+            ["GraphLearning_SumA", float(A.sum().item())],
+            ["SparseCoding_C_min", float(C.min().item())],
+            ["SparseCoding_D_min", float(D.min().item())],
+            ["Loss_Graph_Loss", float(results["loss_graph"].item())],
+            ["Loss_Sparsity_Loss", float(results["sparsity_loss"].item())],
+            ["Loss_D_Orthogonality_Loss", float(results["D_orthogonality_loss"].item())],
+            ["Loss_Reconstruct_Loss", float(results["reconstruct_loss"].item())],
+        ])
+        wandb_logger.log({"ImResult_Table": imresult_table})
+
+
+class MyDualWAT(STBase):
+    """spatial + temporal """
+    # 相比于 singleWAT，MAE和RMSE稍微低一点点，但MAPE高
+
+    def __init__(self, N, input_time_steps, K, L,
+                 Ks = 18,
+                 *args, **kwargs):
+        super(MyDualWAT, self).__init__(*args, **kwargs)
+        self.graph_learning = GraphLearningModule_BernVAE(in_dim=input_time_steps, latent_dim=16, out_dim=1, N=N)
+        # self.graph_learning = KNNGraphLearn(k_neighbors=3, return_adjacency_matrix=True)
+        self.sparse_coding = SparseCodingModule(T=input_time_steps, K=K)
+        self.sparse_coding_spatial = SparseCodingSpatial(N=N, Ks=Ks)
+        self.graphNN = GCN(in_dim=K, out_dim=K)
+        self.graphNN_spatial = GCN_spatial(in_dim=input_time_steps, out_dim=L)
+        # self.graphNN = MultiHeadGAT(head_GAT=4, nhead_out=1,in_dim=K,out_dim=K, N=N)
+        # self.linear_pre_coeff = LinearPreCoeff(in_dim=K, out_dim=K)
+        self.basis_extraction = BasisExtractionModule(in_dim=input_time_steps, out_dim=L, temporal_basis_number=K)
+        self.basisconv = nn.Conv1d(in_channels=K, out_channels=K, kernel_size=3, padding=0, dilation=1, stride=4)
+        self.timeconv = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(1, 3), padding=(0, 1))
+        self.ln = nn.LayerNorm([N, L])
+        self.linear_layer = nn.Linear(N, N)
+        self.finalconv = nn.Conv2d(in_channels=64, out_channels=1, kernel_size=(1, 1))
+
+        self.seq_len = input_time_steps
+        self.N = N
+        self.sqrtN = int(N**0.5)
+        self.K = K
+        self.pred_len = L
+        self.lambda_reconstruct = 0.02
+        self.lambda_graph = 1 / (N ** 1)
+        self.lambda_graph_KL = 1
+        self.lambda_sparse = 1 / (N * K)
+        self.lambda_orthogonality = 0.01
+
+    def _compute_forward_results(self, X):
+        """ 计算模型的所有中间变量，避免 `forward` 和 `log_intermediate_results` 代码重复 """
+
+        # X: [batch_size, N, T]
+        # X = self.timeconv(X.unsqueeze(1)).squeeze(1) # => [batch_size, N, T]
+
+        # 1. 图学习模块
+        A_unnorm = self.graph_learning(X) # [N, N]
+        # A_unnorm = torch.eye(self.N, device = X.device)
+        # A_unnorm = nx.adjacency_matrix(nx.erdos_renyi_graph(self.N, 3.8/self.N, seed=42))
+        A = Adj2EdgeList(A_unnorm) # edge index
+        # A = normalize_adj_add_self_hoop(A_unnorm)
+        # A = torch.ones(2, self.N, device = X.device).int()
+
+        # 2. 稀疏编码模块
+        C, D = self.sparse_coding(X) # C: [batch_size, N, K], D: [K, T]
+        # 3. GCN 模块
+        C_pre = self.graphNN(x=C, adj=A) # => [batch_size, N, K]
+        # 4. 基提取模块
+        D_ext = self.basis_extraction(D) # => [K, L]
+        # 5. 预测模块
+        X_pre_temporal = torch.matmul(C_pre, D_ext) # => [batch_size, N, L]
+
+        # 空间维度对称再来一遍
+        As = torch.ones(2, self.seq_len, device = X.device).int()
+        Cs, Ds = self.sparse_coding_spatial(X) # Cs: [batch_size, T, Ks], Ds: [Ks, N]
+        Cs_pre = self.graphNN_spatial(x=Cs, adj=As) # => [batch_size, L, Ks]
+        Ds_ext = self.linear_layer(Ds) # => [Ks, N]
+        X_pre_spatial = torch.matmul(Cs_pre, Ds_ext) # => [batch_size, L, N]
+        X_pre_spatial = X_pre_spatial.permute(0, 2, 1) # => [batch_size, N, L]
+
+        X_pre = 0.5 * X_pre_spatial + 0.5 * X_pre_temporal
+
+        # 6. 计算各项损失
+        reconstruct_loss = self.lambda_reconstruct * nn.MSELoss()(torch.matmul(C, D), X)
+        reconstruct_loss += self.lambda_reconstruct * nn.MSELoss()(torch.matmul(Cs, Ds), X.permute(0, 2, 1))
+
+        loss_graph = self.lambda_graph_KL * BernKLDiv(A, prior=0.2)
+        sparsity_loss = (self.lambda_sparse * (torch.abs(C).sum()) + self.lambda_sparse * (torch.abs(C_pre).sum()))
+
+        D_gram_matrix = torch.matmul(D, D.T)
+        D_gram_spatial = torch.matmul(Ds, Ds.T)
+        I_Dt = torch.eye(D.shape[0], device=D_gram_matrix.device)
+        I_Ds = torch.eye(Ds.shape[0], device=D_gram_spatial.device)
+        D_orthogonality_loss = self.lambda_orthogonality * torch.norm(D_gram_matrix - I_Dt, p = 'fro')
+        D_orthogonality_loss += self.lambda_orthogonality * torch.norm(D_gram_spatial - I_Ds, p = 'fro')
+
+        return {
+            "X_pre": X_pre,
+            "A_unnorm": A_unnorm,
+            "A": A,
+            "C": C,
+            "D": D,
+            "C_pre": C_pre,
+            "D_ext": D_ext,
+            "reconstruct_loss": reconstruct_loss,
+            "loss_graph": loss_graph,
+            "sparsity_loss": sparsity_loss,
+            "D_orthogonality_loss": D_orthogonality_loss,
+        }
+
+    def forward(self, X):
+        """前向传播调用 `_compute_forward_results`"""
+        results = self._compute_forward_results(X)
+        return results["X_pre"], results["reconstruct_loss"] + results["D_orthogonality_loss"]
+
+    def _log_intermediate_results(self, X):
+        """记录 WAT 模型的中间结果到 WandB"""
+        X = X.to(self.device)
+        wandb_logger = self.logger.experiment  # ✅ 使用 Lightning 传入的 wandb
+        results = self._compute_forward_results(X)
+
+        A, C, D, C_pre, D_ext, X_pre = results["A"], results["C"], results["D"], results["C_pre"], results["D_ext"], \
+        results["X_pre"]
+
+        save_dir = os.path.join(self.result_dir, str(self.logger.version))
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        # ✅ 先转换成 NumPy，并进行 reshape
+        C_reshaped = C.detach().cpu().numpy().reshape(C.shape[0] * C.shape[1], C.shape[2])
+        C_pre_reshaped = C_pre.detach().cpu().numpy().reshape(C_pre.shape[0] * C_pre.shape[1], C_pre.shape[2])
+        X_pre_reshaped = X_pre.detach().cpu().numpy().reshape(X_pre.shape[0] * X_pre.shape[1], X_pre.shape[2])
+
+        # ✅ 将矩阵转换为 Pandas DataFrame 并存储为 CSV
+        pd.DataFrame(A.detach().cpu().numpy()).to_csv(os.path.join(save_dir, "A_matrix.csv"), index=False)
+        pd.DataFrame(C_reshaped).to_csv(os.path.join(save_dir, "C_matrix.csv"), index=False)
+        pd.DataFrame(D.detach().cpu().numpy()).to_csv(os.path.join(save_dir, "D_matrix.csv"), index=False)
+        pd.DataFrame(C_pre_reshaped).to_csv(os.path.join(save_dir, "C_pre_matrix.csv"), index=False)
+        pd.DataFrame(D_ext.detach().cpu().numpy()).to_csv(os.path.join(save_dir, "D_ext_matrix.csv"), index=False)
+        pd.DataFrame(X_pre_reshaped).to_csv(os.path.join(save_dir, "X_pre_matrix.csv"), index=False)
+
+        # 画 A（邻接矩阵）
+        fig_A, ax_A = plt.subplots(figsize=(6, 6))
+        im_A = ax_A.imshow(A.detach().cpu().numpy(), cmap="viridis", aspect="auto")
+        ax_A.set_title("Adjacency Matrix (A)")
+        ax_A.set_xlabel("Nodes")
+        ax_A.set_ylabel("Nodes")
+        plt.colorbar(im_A, ax=ax_A)
+
+        # 存储至本地
+        a_ext_img_path = os.path.join(save_dir, "Adjacency.png")
+        fig_A.savefig(a_ext_img_path, format='png')
+        # 存储至wandb
+        img_buf_A = io.BytesIO()
+        plt.savefig(img_buf_A, format='png')
+        img_buf_A.seek(0)
+        img_A_pil = Image.open(img_buf_A)  # ✅ 这一步转换
+        plt.close(fig_A)
+
+        # ✅ 生成第一张图（D, D_ext 的 1,5,10行）
+        fig_D, axes_D = plt.subplots(nrows=3, ncols=3, figsize=(12, 9))
+
+        rows_to_plot = [0, int(self.K/2), self.K-1]  # 需要绘制的行索引
+        for i, row in enumerate(rows_to_plot):
+            axes_D[i, 0].plot(D[row, :].cpu().detach().numpy(), label=f'D Row {row}')
+            axes_D[i, 0].grid(True)
+            axes_D[i, 0].set_title(f'D - Row {row}')
+            axes_D[i, 0].legend()
+
+            # 计算 FFT 变换
+            time_series = D[row, :].cpu().detach().numpy()
+            fft_values = np.fft.fft(time_series)  # 计算 FFT
+            fft_magnitudes = np.abs(fft_values)  # 计算振幅
+            fft_frequencies = np.fft.fftfreq(len(time_series))  # 计算频率轴
+            # 画频域信号（右列）
+            axes_D[i, 1].plot(fft_frequencies[:len(fft_frequencies) // 2], fft_magnitudes[:len(fft_magnitudes) // 2],
+                              label=f'FFT Row {row}')
+            axes_D[i, 1].grid(True)
+            axes_D[i, 1].set_title(f'FFT - Row {row}')
+            axes_D[i, 1].legend()
+
+            axes_D[i, 2].plot(D_ext[row, :].cpu().detach().numpy(), label=f'D_ext Row {row}')
+            axes_D[i, 2].grid(True)
+            axes_D[i, 2].set_title(f'D_ext - Row {row}')
+            axes_D[i, 2].legend()
+
+        plt.tight_layout()
+
+        # 存储至本地
+        d_ext_img_path = os.path.join(save_dir, "D_Dext_plot.png")
+        fig_D.savefig(d_ext_img_path, format='png')
+        # 存储至wandb
+        img_buf_D = io.BytesIO()
+        plt.savefig(img_buf_D, format='png')
+        img_buf_D.seek(0)
+        img_D_pil = Image.open(img_buf_D)  # 转换为 PIL 图像
+        plt.close(fig_D)
+
+        # 生成第二张图（C, C_pre 的 [0, :, 1], [0, :, 5], [0, :, 10]）
+        fig_C, axes_C = plt.subplots(nrows=3, ncols=2, figsize=(12, 9))
+
+        cols_to_plot = [0, int(self.K/2), self.K-1]
         for i, col in enumerate(cols_to_plot):
             axes_C[i, 0].plot(C[0, :, col].cpu().detach().numpy(), label=f'C [0, :, {col}]')
             axes_C[i, 0].grid(True)

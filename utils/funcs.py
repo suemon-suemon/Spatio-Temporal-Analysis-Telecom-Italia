@@ -6,6 +6,37 @@ import torch.nn.functional as F
 from sklearn.neighbors import NearestNeighbors
 from scipy.sparse import csr_matrix
 
+def AdjMat2LapMat(A, normalized=False):
+    """
+    A: [n,n] 的邻接矩阵 (torch.FloatTensor 或 torch.DoubleTensor 等)
+
+    返回拉普拉斯矩阵 L
+    """
+
+    # 如果是 csr-array，转换为 numpy 数组
+    if isinstance(A, csr_matrix):
+        A =  A.toarray()
+    # 输入数据转化为 tensor
+    if not isinstance(A, torch.Tensor):
+        A = torch.tensor(A, dtype=torch.float)
+
+    # A = A.to(torch.float32)  # 确保类型一致
+    # 度向量 d
+    d = A.sum(dim=-1)  # [n]
+
+    if not normalized:
+        # L = D - A
+        D = torch.diag(d)
+        L = D - A
+    else:
+        # 对称归一化拉普拉斯: L = I - D^{-1/2} * A * D^{-1/2}
+        d_sqrt_inv = 1.0 / torch.sqrt(d + 1e-8)
+        D_sqrt_inv = torch.diag(d_sqrt_inv)
+
+        L = torch.eye(A.size(0), device=A.device, dtype=A.dtype) - D_sqrt_inv @ A @ D_sqrt_inv
+
+    return L
+
 def KNNGraph(X,
              k_neighbors: int = 4,
              radius: float = 2.0,
@@ -163,55 +194,73 @@ def straight_through_gumbel_softmax(logits, temperature, hard=False, self_loops_
     return y_hard
 
 
-def Adj2EdgeList(adjacency_matrix):
+def Adj2EdgeList(adjacency_matrix,
+                 filter_small_values: bool = False,
+                 print_warning: bool = True,
+                 if_weight: bool = False):
     """
     将邻接矩阵转换为边索引列表。
 
-    该函数将给定的邻接矩阵转换为一个边索引的张量，其中每一列表示一个边的起始节点和终止节点的索引。
-    该转换通过非零元素的索引来获得边信息，适用于无向图或有向图（无向图的边在矩阵中是对称的）。
-    参数：
-    adjacency_matrix (torch.Tensor): 一个形状为 (N, N) 的邻接矩阵，其中 N 是节点的数量。
-                                      矩阵的每个元素表示节点之间的连接（0表示无连接，非零值表示连接）。
-    返回：
-    torch.Tensor: 形状为 (2, num_edges) 的张量，dtype=long, 其中每一列是一个边的两个节点索引。
-                  `num_edges` 是矩阵中所有非零元素的数量，每个边由两个节点索引表示（起始节点和终止节点）。
-    例如：
-    输入：
-    adjacency_matrix =
-    [[0, 1, 0],
-     [1, 0, 1],
-     [0, 1, 0]]
-    输出：
-    edge_index =
-    [[0, 1, 1],  # 起始节点
-     [1, 2, 0]]  # 终止节点
-    """
+    该函数将给定的邻接矩阵转换为一个边索引张量，其中每一列表示一条边的两个节点索引。
+    若 if_weight 为 True，还会返回一个边权张量，其中包含每条边对应的权值。
 
+    参数：
+        adjacency_matrix (torch.Tensor or np.ndarray):
+            一个形状为 (N, N) 的邻接矩阵，其中 N 是节点数量。
+            矩阵的每个元素表示节点之间的连接（0表示无连接，非零值表示连接）。
+        filter_small_values (bool): 是否滤除小于阈值的数值，默认为 False。
+        print_warning (bool): 若邻接矩阵中包含 0 和 1 之外的值，则是否打印警告信息，默认为 True。
+        if_weight (bool): 如果为 True，则返回 (edge_index, edge_weight)；否则只返回 edge_index。
+
+    返回：
+        当 if_weight 为 False 时，返回：
+            torch.Tensor: 形状为 (2, num_edges) 的边索引张量，dtype 为 long。
+        当 if_weight 为 True 时，返回：
+            (edge_index, edge_weight)
+            edge_index 是形状为 (2, num_edges) 的张量 (dtype long)；
+            edge_weight 是形状为 (num_edges,) 的张量，包含对应边的权值。
+
+    示例：
+        输入：
+            adjacency_matrix =
+            [[0, 1, 0],
+             [1, 0, 1],
+             [0, 1, 0]]
+        若 if_weight=False，则输出 edge_index =
+            [[0, 1, 1],
+             [1, 2, 0]]
+        若 if_weight=True，则输出 (edge_index, edge_weight)，其中 edge_weight 为 [1, 1, 1]。
+    """
     # 如果是 csr-array，转换为 numpy 数组
+    from scipy.sparse import csr_matrix  # 如果尚未导入
     if isinstance(adjacency_matrix, csr_matrix):
-        adjacency_matrix =  adjacency_matrix.toarray()
+        adjacency_matrix = adjacency_matrix.toarray()
 
     # 输入数据转化为 tensor
     if not isinstance(adjacency_matrix, torch.Tensor):
         adjacency_matrix = torch.tensor(adjacency_matrix)
 
-    edge_index_list = []  # 用于存储边索引的列表
+    # 是否去除小值
+    if filter_small_values:
+        # 假设 threshold_small 是已定义的函数，用于将小于阈值的元素置零
+        adjacency_matrix = threshold_small(adjacency_matrix, threshold=1e-3)
 
-    # 检查矩阵是否包含0和1之外的值
-    if not torch.all(torch.logical_or(adjacency_matrix == 0, adjacency_matrix == 1)):
-        print("Warning: adjacency matrix contains values other than 0 or 1. This operation may not be differentiable!")
+    # 检查矩阵是否包含 0 和 1 之外的值
+    if print_warning:
+        if not torch.all(torch.logical_or(adjacency_matrix == 0, adjacency_matrix == 1)):
+            print(
+                "Warning: adjacency matrix contains values other than 0 or 1. This operation may not be differentiable!")
 
-    # 找到邻接矩阵中非零元素的索引（即存在边的节点对）
-    # (adjacency_matrix > 0) 会返回一个布尔矩阵，nonzero() 返回非零元素的索引，t() 转置
-    edges = (adjacency_matrix > 0).nonzero().t()  # 形状为 [2, num_edges] 的 torch.Tensor
+    # 找到邻接矩阵中非零元素的索引，得到形状 [2, num_edges] 的张量
+    edges = (adjacency_matrix > 0).nonzero().t().long()
 
-    edge_index_list.append(edges)  # 将边的索引添加到列表中
-
-    # 将所有边索引在第0维拼接
-    edge_index = torch.cat(edge_index_list, dim=0).long()
-    # 形状为 [2, total_num_edges], dtype = torch.int64
-
-    return edge_index
+    # 如果需要返回边权，则从邻接矩阵中取出对应的权值
+    if if_weight:
+        # edges 的第一行和第二行分别为起始节点和终止节点索引
+        edge_weight = adjacency_matrix[edges[0], edges[1]]
+        return edges, edge_weight
+    else:
+        return edges
 
 
 def GauSamplesGenerate(mu, logvar):

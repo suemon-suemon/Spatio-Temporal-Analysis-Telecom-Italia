@@ -5,6 +5,7 @@
 
 from mxnet import nd
 from mxnet.gluon import nn
+from utils.registry import register
 
 
 class cheb_conv(nn.Block):
@@ -177,7 +178,7 @@ class MSTGCN_submodule(nn.Block):
         self.W._finish_deferred_init()
         return module_output * self.W.data()
 
-
+@register("MSTGCN")
 class MSTGCN(nn.Block):
     '''
     MSTGCN, 3 sub-modules, for hour, day, week respectively

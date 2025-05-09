@@ -1,0 +1,35 @@
+# ==============================
+# 运行 MLP on Taiwan 数据集
+# ==============================
+
+# 注册名：对应 @register("DualWAT") 和 @register("Taiwan")
+model: MLP
+dataset: Taiwan
+
+# ========== 数据相关 ==========
+format: completion
+aggr_time: 10min          # 时间粒度（可选: 5min, 10min, hour）
+time_range: all           # 使用全时间段
+normalize: true           # 是否归一化
+user_type: vehicular      # 用于 taiwan 时可选：pedestrian / vehicular / v-s 等
+grid_range: [0, 2, 0, 6]  # 可选，裁剪区域（可去掉）
+missing_ratio: 0.4
+
+# ========== 模型结构 ==========
+close_len: 6              # 输入窗口长度
+pred_len: 3               # 预测窗口长度
+period_len: 0
+trend_len: 0
+mlp_dim: 128
+show_fig: True
+
+# ========== 训练相关 ==========
+batch_size: 64
+learning_rate: 0.0001
+criterion: L1Loss
+
+# ========== 日志 / 实验信息 ==========
+project_name: Completion
+exp_name: MLP
+exp_tag: most simple model
+#ckpt_path: /home/jiayin/PycharmProjects/Spatio-Temporal-Analysis-Telecom-Italia/TaiwanPredict/dualwat, grid Gs,_05021639/checkpoints/epoch=199-step=44600.ckpt

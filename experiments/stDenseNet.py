@@ -20,7 +20,6 @@ if __name__ == "__main__":
         # dataset
         time_range = 'all',
         aggr_time = '10min',
-        tele_col = 'internet',
 
         normalize = True,
         batch_size = 32,
@@ -28,10 +27,10 @@ if __name__ == "__main__":
 
         max_epochs = 100,
         criterion = nn.L1Loss,
-        close_len = 128,  # 3
+        close_len = 6,  # 3
         period_len = 0,  # 3
         trend_len = 0,
-        pred_len = 32,  # 1
+        pred_len = 3,  # 1
 
         show_fig = False,
     )
@@ -45,16 +44,17 @@ if __name__ == "__main__":
         normalize=p['normalize'],
         aggr_time=p['aggr_time'],
         time_range=p['time_range'],
-        tele_column=p['tele_col'],
     )
+
     model = STDenseNet(
         learning_rate = p['learning_rate'],
         channels = [p['close_len'], p['period_len'], p['trend_len']],
+        pred_len=p['pred_len'],
         show_fig = p['show_fig'],
     )
 
     wandb_logger = WandbLogger(project="MilanPredict",
-        name=f"STDense_128_32")
+        name=f"STDense_6_3")
     wandb_logger.experiment.config["exp_tag"] = "stDenseNet"
     wandb_logger.experiment.config.update(p)
 
@@ -63,6 +63,8 @@ if __name__ == "__main__":
         log_every_n_steps=1,
         check_val_every_n_epoch=1,
         max_epochs=p['max_epochs'],
+        enable_model_summary=True,
+        enable_progress_bar=True,
         logger=wandb_logger,
         devices=1,
         callbacks=[lr_monitor, 

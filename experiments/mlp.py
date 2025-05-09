@@ -2,7 +2,7 @@ from fix_path import fix_python_path_if_working_locally
 
 fix_python_path_if_working_locally()
 
-from datasets import MilanFG
+from datasets.Milan import MilanDataset
 from models import MLP
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
@@ -18,7 +18,6 @@ if __name__ == "__main__":
         # dataset
         time_range = 'all',
         aggr_time = None,
-        tele_col = 'internet',
         batch_size = 64,
         learning_rate = 1e-4,
         normalize = True,
@@ -26,10 +25,10 @@ if __name__ == "__main__":
         # model trainer
         max_epochs = 1000,
         criterion = nn.L1Loss,
-        close_len = 128,
+        close_len = 6,
         period_len = 0,
-        pred_len = 32,
-        mlp_dim = 512,
+        pred_len = 3,
+        mlp_dim = 128,
     )
 
     model = MLP(
@@ -40,9 +39,8 @@ if __name__ == "__main__":
         learning_rate=p['learning_rate'],
     )
 
-    dm = MilanFG(
-        tele_column=p['tele_col'],
-        batch_size=p['batch_size'], 
+    dm = MilanDataset(
+        batch_size=p['batch_size'],
         close_len=p['close_len'], 
         period_len=p['period_len'],
         aggr_time=p['aggr_time'],
@@ -51,7 +49,7 @@ if __name__ == "__main__":
         pred_len=p['pred_len'],
     )
 
-    wandb_logger = WandbLogger(name = "MLP_128_32",
+    wandb_logger = WandbLogger(name = "MLP_6_3",
                                project="MilanPredict")
     wandb_logger.experiment.config["exp_tag"] = "MLP"
     wandb_logger.experiment.config.update(p, allow_val_change=True)

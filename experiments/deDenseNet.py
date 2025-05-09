@@ -2,7 +2,7 @@ from fix_path import fix_python_path_if_working_locally
 
 fix_python_path_if_working_locally()
 
-from datasets import MilanFG
+from datasets.Milan import MilanDataset
 from models.DeDenseNet import DeDenseNet
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
@@ -20,7 +20,7 @@ if __name__ == "__main__":
             time_range = 'all',
             aggr_time = None,
             tele_col = tele_col,
-            grid_range = (41, 60, 41, 60),
+            # grid_range = (41, 60, 41, 60),
 
             normalize = True,
             batch_size = 32,
@@ -28,10 +28,10 @@ if __name__ == "__main__":
     
             max_epochs = 200,
             criterion = nn.L1Loss,
-            close_len = 16,
-            period_len = 0,
-            trend_len = 0,
-            pred_len = 1,
+            close_len = 2,
+            period_len = 2,
+            trend_len = 2,
+            pred_len = 3,
 
             layers_s = 4,
             growth_rate_s = 32,
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         )
 
         dm = MilanFG(
-            grid_range=p['grid_range'],
+            # grid_range=p['grid_range'],
             batch_size=p['batch_size'],
             close_len=p['close_len'], 
             period_len=p['period_len'], 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
 
         model = DeDenseNet(
             learning_rate = p['learning_rate'],
-            channels = p['close_len'],
+            channels = p['close_len']+p['period_len']+p['trend_len'],
             pred_len = p['pred_len'],
 
             layers_s = p['layers_s'],
@@ -80,7 +80,7 @@ if __name__ == "__main__":
         )
 
         wandb_logger = WandbLogger(project = "MilanPredict",
-                                   name = "DeDense")
+                                   name = "DeDense_period_trend_6_3")
         wandb_logger.experiment.config["exp_tag"] = "DeDenseNet"
         wandb_logger.experiment.config.update(p, allow_val_change=True)
 
@@ -88,6 +88,8 @@ if __name__ == "__main__":
         trainer = Trainer(
             log_every_n_steps=1,
             check_val_every_n_epoch=1,
+            enable_progress_bar=True,
+            enable_model_summary=True,
             max_epochs=p['max_epochs'],
             logger=wandb_logger,
             devices=1,

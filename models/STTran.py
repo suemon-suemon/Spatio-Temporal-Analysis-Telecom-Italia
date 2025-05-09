@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 import math
-
+from utils.registry import register
 from models.STBase import STBase
 
 class PositionalEncoding(nn.Module):
@@ -20,7 +20,7 @@ class PositionalEncoding(nn.Module):
     def forward(self, x):
         return x + self.pe[:x.size(0), :]
           
-
+@register("STTran")
 class STTran(STBase):
     def __init__(self, 
                  close_len = 3,

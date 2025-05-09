@@ -1,0 +1,40 @@
+# ==============================
+# 运行 DualWAT on Taiwan 数据集
+# ==============================
+
+# 注册名：对应 @register("DualWAT") 和 @register("Taiwan")
+model: DualWAT
+dataset: Taiwan
+
+# ========== 数据相关 ==========
+format: mywat
+aggr_time: 5min          # 时间粒度（可选: 5min, 10min, hour）
+time_range: all           # 使用全时间段
+normalize: true           # 是否归一化
+user_type: vehicular      # 用于 taiwan 时可选：pedestrian / vehicular / v-s 等
+grid_range: [0, 2, 0, 6]  # 可选，裁剪区域（可去掉）
+
+# ========== 模型结构 ==========
+close_len: 6              # 输入窗口长度
+pred_len: 3               # 预测窗口长度
+period_len: 0
+trend_len: 0
+n_col: 3                     # 节点数
+n_row: 7
+time_basis_number: 4
+spatial_basis_number: 12
+lambda_reconstruct: 0.002
+lambda_orthogonality: 0.001
+show_fig: True
+
+# ========== 训练相关 ==========
+batch_size: 32
+learning_rate: 0.001
+criterion: L1Loss
+max_epochs: 1000
+
+# ========== 日志 / 实验信息 ==========
+project_name: TaiwanPredict
+exp_name: DualWAT
+exp_tag: Grid Gs, Diag Gt
+ckpt_path: /home/jiayin/PycharmProjects/Spatio-Temporal-Analysis-Telecom-Italia/TaiwanPredict/dualwat, grid Gs,_05021639/checkpoints/epoch=199-step=44600.ckpt

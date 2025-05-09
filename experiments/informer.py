@@ -27,15 +27,16 @@ if __name__ == "__main__":
         criterion = nn.L1Loss,
         x_dim = 11, 
         y_dim = 11,
-        seq_len = 48,
+        seq_len = 6,
 
         label_len = 12,
-        out_len = 1,
+        out_len = 3,
 
-        close_len = 16,
-        period_len = 6,
+        close_len = 6,
+        period_len = 0,
         trend_len = 0,
     )
+
     if IS_SW:
         model = Informer(
             enc_in = p['x_dim'] * p['y_dim'],
@@ -82,7 +83,7 @@ if __name__ == "__main__":
         )
         
     # model = Informer.load_from_checkpoint("milanST/36jlvz18/checkpoints/epoch=105-step=1788749.ckpt")
-    wandb_logger = WandbLogger(project="MilanPredict", name='informer')
+    wandb_logger = WandbLogger(project="MilanPredict", name='informer_6_3')
     wandb_logger.experiment.config["exp_tag"] = "Informer_{}".format('SW' if IS_SW else 'FG')
     wandb_logger.experiment.config.update(p, allow_val_change=True)
 

@@ -1,0 +1,34 @@
+# ==============================
+# 运行 LightSTGCN on Milan 数据集
+# ==============================
+
+# 注册名：对应 @register("lightstgcn") 和 @register("milan")
+model: LightSTGCN
+dataset: Milan
+
+# ========== 数据相关 ==========
+aggr_time: 10min          # 时间粒度（可选: 5min, 10min, hour）
+time_range: all           # 使用全时间段
+normalize: true           # 是否归一化
+user_type: all            # 用于 taiwan 时可选：pedestrian / vehicular / v-s 等
+grid_range: [41, 60, 41, 60]  # 可选，milan 时裁剪区域（可去掉）
+format: stgcn
+
+# ========== 模型结构 ==========
+close_len: 6              # 输入窗口长度
+pred_len: 3               # 预测窗口长度
+period_len: 0
+trend_len: 0
+feature_len: 64           # STGCN 的特征维度
+cheb_k: 2                 # Chebyshev polynomial order
+
+# ========== 训练相关 ==========
+batch_size: 32
+learning_rate: 0.001
+max_epochs: 100
+criterion: L1Loss         # 可换成 MSELoss 等
+
+# ========== 日志 / 实验信息 ==========
+project_name: MilanPredict
+exp_tag: lightstgcn
+log_wandb: false           # 若用 wandb，命令行加 --log_wandb 会覆盖此项

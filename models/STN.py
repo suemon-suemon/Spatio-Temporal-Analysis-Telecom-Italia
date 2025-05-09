@@ -3,9 +3,10 @@ from models.STBase import STBase
 from torch.nn import Conv3d, Linear, Sequential, ReLU, Flatten, MaxPool3d
 from torch import concat, sigmoid
 import torch.nn.functional as F
-
+from utils.registry import register
 from models.convlstm import ConvLSTM
 
+@register("STN")
 class STN(STBase):
     '''
     Long-term mobile trafﬁc forecasting using deep spatio-temporal neural networks

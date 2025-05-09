@@ -3,10 +3,9 @@ import wandb
 fix_python_path_if_working_locally()
 import torch
 from torch import nn
-
 from datetime import datetime
-from datasets.Milan import MilanDataset
-from models.MyWAT import MySingleWAT, MyDualWAT
+from datasets import MilanFG
+from models.StemGNN import StemGNN
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -20,9 +19,9 @@ if __name__ == "__main__":
     p = dict(
         show_fig = True,
         show_intermediate_results = True,
-        log_run_name='WAT_Single_SmoothG_6_3',
+        log_run_name='stemgnn_6_3',
         log_project_name="MilanPredict",
-        log_run_tag=["Smooth Graph",
+        log_run_tag=["grid Gs", "toeplitz Gt"
                      "6->3"],
         time_now=timestamp,
 
@@ -33,13 +32,18 @@ if __name__ == "__main__":
         batch_size = 32,
         learning_rate = 1e-3,
 
-        max_epochs = 300,
-        criterion = nn.L1Loss(),
+        # model
+        multi_layer = 2,
+        stack_cnt = 2,
+        units = 32, # 隐藏层数量
+        dropout_rate = 0.5,
+
+        max_epochs = 100,
+        criterion = nn.L1Loss,
         close_len = 6,
         period_len = 0,
         trend_len = 0,
         pred_len = 3,
-        time_basis_number = 4,
         )
 
     # 先用 `wandb.init()` 初始化 WandB
@@ -56,7 +60,7 @@ if __name__ == "__main__":
     # 创建 `WandbLogger`，复用 `wandb` 运行实例
     wandb_logger = WandbLogger(experiment=wandb.run)
 
-    dm = MilanDataset(
+    dm = MilanFG(
         format='mywat',
         batch_size = p['batch_size'],
         close_len = p['close_len'],
@@ -68,13 +72,17 @@ if __name__ == "__main__":
         time_range = p['time_range'],
         )
 
-    model = MySingleWAT(
-                  N = dm.N_all,
-                  input_time_steps = p['close_len'],
-                  K = p['time_basis_number'],
-                  L = p['pred_len'],
-                  show_fig = p['show_fig'],
-                  show_intermediate_results = p['show_intermediate_results'],
+    model = StemGNN(
+                node_cnt = dm.N_all,
+                units = p['units'],
+                multi_layer = p['multi_layer'],
+                stack_cnt = p['stack_cnt'],
+                dropout_rate = p['dropout_rate'],
+                time_step= p['close_len'],
+                horizon = p['pred_len'],
+                learning_rate = p['learning_rate'],
+                show_fig = p['show_fig'],
+                criterion=p['criterion'],
                  )
 
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -87,7 +95,7 @@ if __name__ == "__main__":
         enable_progress_bar = True,
         enable_model_summary = True,
         callbacks=[lr_monitor,
-                   EarlyStopping(monitor='val_loss', patience=10,
+                   EarlyStopping(monitor='val_loss', patience=20,
                                  min_delta=1e-5, verbose=True)]
          )
 
@@ -95,5 +103,4 @@ if __name__ == "__main__":
 
     torch.autograd.set_detect_anomaly(True)  # ✅ 全局启用梯度异常检测
     trainer.fit(model, dm)
-    trainer.test(model, datamodule=dm)
-    trainer.predict(model, datamodule=dm)
+    trainer.test(model, dm)

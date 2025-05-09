@@ -1,11 +1,13 @@
 # 2023 TMC 古博
 # MVSTGN: A Multi-View Spatial-Temporal Graph Network for Cellular Traffic Prediction
+# 原版代码只能预测单时间步
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
 import numpy as np
 from collections import OrderedDict
 from models.STBase import STBase
+from utils.registry import register
 
 
 
@@ -594,6 +596,8 @@ class PositionalEncoding(nn.Module):
     def forward(self, x):
         return self.pos_table[:, :x].clone().detach()
 
+
+@register("Mvstgn")
 class Mvstgn(STBase):
     def __init__(self, 
                  input_shape, 
@@ -601,7 +605,6 @@ class Mvstgn(STBase):
                  num_init_features=12, 
                  bn_size=4,
                  drop_rate=0.2, 
-                 nb_flows=1,
                  pred_len=1,
                  **kwargs):
         super(Mvstgn, self).__init__(**kwargs)
@@ -609,9 +612,10 @@ class Mvstgn(STBase):
         self.seq_len = self.input_shape[1]
         self.pred_len = pred_len
         self.filters = num_init_features 
-        self.channels = nb_flows
+        self.channels = pred_len
+        self.nb_flows = 1
         self.h, self.w = self.input_shape[-2], self.input_shape[-1]
-        self.inner_shape = self.input_shape[:2] + (self.filters, ) + self.input_shape[-2:]
+        # self.inner_shape = self.input_shape[:2] + (self.filters, ) + self.input_shape[-2:]
         self.d_model = input_shape[1]*input_shape[2] 
         self.d_inner = 128
         self.nheads = 6 
@@ -654,7 +658,11 @@ class Mvstgn(STBase):
 
         self.features.add_module('norm5', nn.BatchNorm2d(num_features))
         self.features.add_module('relulast', nn.ReLU(inplace=True))
-        self.features.add_module('convlast', nn.Conv2d(num_features, nb_flows, kernel_size=1, padding=0, bias=False))
+
+        # 原版，仅能预测单时间步
+        # self.features.add_module('convlast', nn.Conv2d(num_features, self.nb_flows, kernel_size=1, padding=0, bias=False))
+        # 我修改的版本，预测多时间步
+        self.features.add_module('convlast', nn.Conv2d(num_features, self.pred_len * self.nb_flows, kernel_size=1, padding=0, bias=False))
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -684,6 +692,15 @@ class Mvstgn(STBase):
 
         out = self.features(out)
         # out = out.squeeze()
+        out = out.view(batch_size, self.pred_len, self.nb_flows, num_of_cells, num_of_cells)
 
-        out = torch.sigmoid(out) 
+        out = torch.sigmoid(out)
         return out
+
+if __name__ == '__main__':
+    # Batch X shape: torch.Size([32, 6, 1, 20, 20])
+    # Batch Y shape: torch.Size([32, 3, 1, 20, 20])
+    x = torch.randn(32, 6, 1, 20, 20)
+    model = Mvstgn(input_shape=[32, 6, 1, 20, 20], pred_len=3)
+    y = model(x)
+    print('y shape is:', y.shape)

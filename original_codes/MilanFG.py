@@ -44,22 +44,23 @@ class MilanFG(Milan):
                  trend_len: int = 0,
                  label_len: int = 0,
                  pred_len: int = 1,
-                 **kwargs):
-        super(MilanFG, self).__init__(**kwargs)
+                 service_dim: int = 1, # 业务种类数
+                 *args, **kwargs):
+        super(MilanFG, self).__init__(*args, **kwargs)
         self.format = format
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
         self.label_len = label_len
         self.pred_len = pred_len
+        self.service_dim = service_dim
 
     def prepare_data(self):
         Milan.prepare_data(self)
     
     def setup(self, stage=None):
-        self.prepare_data() # 以初始化self.meta
+        # self.prepare_data() # 以初始化self.meta
         Milan.setup(self, stage)
-
         train_len, val_len, test_len = self.get_default_len()
 
         self.milan_timestamps = {
@@ -68,9 +69,30 @@ class MilanFG(Milan):
             "test": self.timestamps[train_len+val_len-(self.close_len+self.pred_len-1):train_len+val_len+test_len],
         }
 
-        self.milan_train, self.milan_val, self.milan_test = self.train_test_split(self.milan_grid_data, train_len, val_len, test_len)
+        # 将时间特征拼接到流量数据上，再去划分训练/验证/测试集
+        formats_with_time_feature = ['mywat_withtimefeature', 'stsgnn']
+        if self.format in formats_with_time_feature and self.milan_grid_data.shape[1] == self.service_dim: # 第二个判断防止重复拼接
+            self.service_dim = self.milan_grid_data.shape[1]
+            # 计算时间特征向量
+            if self.format == 'mywat_withtimefeature':
+                self.time_feature_period = True
+                time_feature = Milan._generate_time_feature(self)
+            elif self.format == 'stsgnn':
+                self.time_feature_period = False
+                time_feature = Milan._generate_time_feature(self)
+                time_feature = time_feature[:, [1,2]] # 只取day-of-week 和 step-of-day
 
-        self.mialn_val = np.concatenate((self.milan_train[-(self.close_len+self.pred_len-1):], self.milan_val))
+            # 将 time_feature 拼接到 milan_grid_data 的特征维度上
+            slice_shape = self.milan_grid_data.shape[-2:]  # [n_row, n_col]
+            time_feature_expanded = np.repeat(time_feature[:, :, np.newaxis, np.newaxis], slice_shape[0],
+                                              axis=2)  # 在第3轴扩展20
+            time_feature_expanded = np.repeat(time_feature_expanded, slice_shape[1], axis=3)  # 在第4轴扩展20
+            self.milan_grid_data = np.concatenate((self.milan_grid_data, time_feature_expanded),
+                                                  axis=1)  # axis=-1 表示沿着最后一个维度堆叠
+            # print(f'milan_grid_data shape: {self.milan_grid_data.shape}')
+
+        self.milan_train, self.milan_val, self.milan_test = self.train_test_split(self.milan_grid_data, train_len, val_len, test_len)
+        self.milan_val = np.concatenate((self.milan_train[-(self.close_len+self.pred_len-1):], self.milan_val))
         self.milan_test = np.concatenate((self.milan_val[-(self.close_len+self.pred_len-1):], self.milan_test))
         # print('train shape: {}, val shape: {}, test shape: {}'.format(self.milan_train.shape, self.milan_val.shape, self.milan_test.shape))
 
@@ -87,8 +109,8 @@ class MilanFG(Milan):
         return self.test_dataloader()
 
     def _get_dataset(self, data, stage, meta=None):
-        # print('milan_data_shape: ', data.shape)
-        # milan_data_shape: (6796, 1, 20, 20)
+        # print('data_shape: ', data.shape)
+        # data_shape: (6796, 1, 20, 20)
 
         if self.format == 'default':
             return MilanFullGridDataset(data, self.aggr_time, self.close_len, 
@@ -96,6 +118,13 @@ class MilanFG(Milan):
         elif self.format == 'mywat':
             return MilanMyWATDataset(data, self.aggr_time, self.close_len, self.period_len,
                                      self.trend_len, self.pred_len)
+        elif self.format == 'mywat_withtimefeature':
+            return MilanMyWATTFDataset(data, self.aggr_time, self.close_len,
+                                       self.period_len, self.trend_len,
+                                       self.pred_len, self.service_dim)
+        elif self.format == "graphlearnvae":
+            return MilanGraphLearnVAEDataset(data, self.aggr_time, self.close_len, self.period_len,
+                                             self.trend_len)
         elif self.format == 'informer':
             return MilanFGInformerDataset(data, self.milan_timestamps[stage], self.aggr_time, self.close_len, 
                                             self.period_len, self.trend_len, self.label_len, self.pred_len)
@@ -108,6 +137,12 @@ class MilanFG(Milan):
         elif self.format == 'scope':
             return MilanSCOPEDataset(data, self.aggr_time, self.close_len, self.period_len,
                                      self.trend_len, self.pred_len)
+        elif self.format == 'stsgnn':
+            return MilanSTSGNNTFDataset(data, self.aggr_time, self.close_len,
+                                        self.period_len, self.trend_len,
+                                        self.pred_len, self.service_dim)
+        else:
+            raise NotImplementedError(f'{self.format} is not implemented')
 
 class MilanFullGridDataset(Dataset):
     """full grid"""
@@ -118,11 +153,11 @@ class MilanFullGridDataset(Dataset):
     每个样本通过选择一个时间窗口内的数据来作为输入 X，并将预测时刻单个网格的值作为目标 Y。
 
     输入数据:
-      - milan_data: 一个 pandas DataFrame 或 NumPy 数组，形状为 (n_timestamps, n_grid_row, n_grid_col)
+      - data: 一个 pandas DataFrame 或 NumPy 数组，形状为 (n_timestamps, n_grid_row, n_grid_col)
                     表示在不同时间步、不同空间网格上的数值记录。
 
     参数:
-      - milan_data: 上述输入数据。
+      - data: 上述输入数据。
       - aggr_time (str): 时间聚合方式，要求为 None 或 'hour'，保证时间分组一致性。
       - close_len (int): 最近历史数据窗口的时间步数，即用于输入的历史数据长度。
       - period_len (int): 周期性历史数据窗口的时间步数（可选），默认 0 表示不使用周期性数据。
@@ -146,17 +181,16 @@ class MilanFullGridDataset(Dataset):
         对空间维度在前后各填充 window_size//2 个单位，填充值为 0，以确保边缘区域也能构造出完整窗口。
     """
     def __init__(self,
-                 milan_data,
+                 data,
                  aggr_time: str,
                  close_len: int = 12,
                  period_len: int = 0,
                  trend_len: int = 0,
                  pred_len: int = 1):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
-        # if aggr_time not in [None, 'hour']:
-        #     raise ValueError("aggre_time must be None or 'hour'")
+
         self.time_level = aggr_time
-        self.milan_data = milan_data
+        self.data = data
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
@@ -165,19 +199,19 @@ class MilanFullGridDataset(Dataset):
         print("MilanFullGridDataset: length {}".format(self.__len__()))
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.pred_len
+        return len(self.data)+1 - self.in_len - self.pred_len
     
     def __getitem__(self, idx):
         out_start_idx = idx + self.in_len
-        slice_shape = self.milan_data.shape[1:]
+        slice_shape = self.data.shape[1:]
         indices = get_indexes_of_train('default', self.time_level, out_start_idx, 
                                         self.close_len, self.period_len, self.trend_len)
 
-        X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         X = np.stack(X, axis=0).astype(np.float32)
         # X = X.reshape((1, X.shape[0], X.shape[1], X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
 
-        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len].astype(np.float32)
+        Y = self.data[out_start_idx: out_start_idx+self.pred_len].astype(np.float32)
         return X, Y
 
 
@@ -187,7 +221,7 @@ class MilanFGInformerDataset(Dataset):
     除了基本的输入和目标数据外，还会生成相应的时间特征。
 
     参数：
-      - milan_data (pd.DataFrame): 原始 Milan 数据，形状 (n_timestamps, n_grid_row, n_grid_col)。
+      - data (pd.DataFrame): 原始 Milan 数据，形状 (n_timestamps, n_grid_row, n_grid_col)。
       - timestamps (pd.DataFrame): 与数据对应的时间戳数据，用于生成时间特征。
       - aggr_time: 时间聚合方式，例如 'hour' 或其它（决定时间特征生成频率）。
       - window_size (int): 空间窗口大小，用于截取局部区域数据。
@@ -202,7 +236,7 @@ class MilanFGInformerDataset(Dataset):
       - Y_timefeature: 目标对应的时间特征，形状由 time_features 函数决定。
     """
     def __init__(self,
-                 milan_data,
+                 data,
                  timestamps,
                  aggr_time: str,
                  close_len: int = 12,
@@ -211,10 +245,9 @@ class MilanFGInformerDataset(Dataset):
                  label_len: int = 12,
                  pred_len: int = 1):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
-        # if aggr_time not in [None, 'hour']:
-        #     raise ValueError("aggre_time must be None or 'hour'")
+
         self.time_level = aggr_time
-        self.milan_data = milan_data
+        self.data = data
         self.timestamps = time_features(timestamps, timeenc=1, 
                                         freq='h' if self.time_level == 'hour' else 't')
         self.close_len = close_len
@@ -225,18 +258,18 @@ class MilanFGInformerDataset(Dataset):
         self.pred_len = pred_len
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.pred_len
+        return len(self.data)+1 - self.in_len - self.pred_len
     
     def __getitem__(self, idx):
         out_start_idx = idx + self.in_len
-        slice_shape = self.milan_data.shape[1:]
+        slice_shape = self.data.shape[1:]
         indices = get_indexes_of_train('default', self.time_level, out_start_idx, 
                                         self.close_len, self.period_len, self.trend_len)
-        X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         X = np.stack(X, axis=0)
         X = X.reshape((X.shape[0], X.shape[2] * X.shape[3])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
 
-        Y = self.milan_data[out_start_idx-self.label_len: out_start_idx+self.pred_len].squeeze()
+        Y = self.data[out_start_idx-self.label_len: out_start_idx+self.pred_len].squeeze()
         Y = Y.reshape((Y.shape[0], Y.shape[1] * Y.shape[2]))
 
         X_timefeature = [self.timestamps[i] if i >= 0 else np.zeros((self.timestamps.shape[1])) for i in indices]
@@ -252,7 +285,7 @@ class MilanFGTimeFDataset(Dataset):
     除了输入和目标数据，还返回了辅助的 meta 数据和时间特征。
 
     参数：
-      - milan_data (pd.DataFrame): 原始 Milan 数据，形状 (n_timestamps, n_grid_row, n_grid_col)。
+      - data (pd.DataFrame): 原始 Milan 数据，形状 (n_timestamps, n_grid_row, n_grid_col)。
       - meta: 网格元数据，用于辅助信息。
       - timestamps (pd.DataFrame): 时间戳数据，用于生成时间特征。
       - aggr_time (str): 时间聚合方式，决定时间特征生成的频率。
@@ -268,7 +301,7 @@ class MilanFGTimeFDataset(Dataset):
       - X_meta: 网格元数据，通常与空间信息相关。
 """
     def __init__(self,
-                 milan_data,
+                 data,
                  meta,
                  timestamps,
                  aggr_time: str,
@@ -277,10 +310,9 @@ class MilanFGTimeFDataset(Dataset):
                  trend_len: int = 0,
                  pred_len: int = 1):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
-        # if aggr_time not in [None, 'hour']:
-        #     raise ValueError("aggre_time must be None or 'hour'")
+
         self.time_level = aggr_time
-        self.milan_data = milan_data
+        self.data = data
         self.meta = meta
 
         self.close_len = close_len
@@ -293,20 +325,20 @@ class MilanFGTimeFDataset(Dataset):
         print("MilanFullGridDataset: length {}".format(self.__len__()))
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.pred_len
+        return len(self.data)+1 - self.in_len - self.pred_len
     
     def __getitem__(self, idx):
         out_start_idx = idx + self.in_len
-        slice_shape = self.milan_data.shape[1:]
+        slice_shape = self.data.shape[1:]
         indices = get_indexes_of_train('default', self.time_level, out_start_idx, 
                                         self.close_len, self.period_len, self.trend_len, pred_len=self.pred_len)
 
-        X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         X = np.stack(X, axis=0).astype(np.float32)
         # dist = dtw.distance_matrix_fast(X.reshape(self.in_len, -1).T.astype(np.float64))
         # X = X.reshape((1, X.shape[0], X.shape[1], X.shape[2])) # (n_features, n_timestamps, n_grid_row, n_grid_col)))
 
-        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len].astype(np.float32)
+        Y = self.data[out_start_idx: out_start_idx+self.pred_len].astype(np.float32)
 
         X_timefeature = [self.timestamps[i] if i >= 0 else np.zeros((self.timestamps.shape[1])) for i in indices]
         X_timefeature = np.stack(X_timefeature, axis=0).astype(np.float32)
@@ -320,7 +352,7 @@ class MilanFGStTranDataset(Dataset):
         此数据集用于 STTran 模型，通过近期数据、周期性数据来构造输入，并预测未来的值。
 
         参数：
-          - milan_data: 原始 Milan 数据，形状 (n_timestamps, n_grid_row, n_grid_col)。
+          - data: 原始 Milan 数据，形状 (n_timestamps, n_grid_row, n_grid_col)。
           - aggr_time (str): 时间聚合方式，支持 None 或 'hour'。
           - close_len (int): 最近历史数据窗口长度。
           - period_len (int): 周期性历史数据窗口长度。
@@ -332,16 +364,15 @@ class MilanFGStTranDataset(Dataset):
           - Y: 预测目标，处理后形状为 (n_features, pred_len)。
     """
     def __init__(self,
-                 milan_data,
+                 data,
                  aggr_time: str,
                  close_len: int = 3,
                  period_len: int = 3,
                  pred_len: int = 3):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
-        # if aggr_time not in [None, 'hour']:
-        #     raise ValueError("aggre_time must be None or 'hour'")
+
         self.time_level = aggr_time
-        self.milan_data = milan_data
+        self.data = data
         self.close_len = close_len
         self.period_len = period_len
         self.in_len = close_len
@@ -349,17 +380,17 @@ class MilanFGStTranDataset(Dataset):
 
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.pred_len
+        return len(self.data)+1 - self.in_len - self.pred_len
     
     def __getitem__(self, idx):
         out_start_idx = idx + self.in_len
-        slice_shape = self.milan_data.shape[1:]
+        slice_shape = self.data.shape[1:]
 
-        Xc = self.milan_data[out_start_idx-self.close_len: out_start_idx] # Xc
+        Xc = self.data[out_start_idx-self.close_len: out_start_idx] # Xc
         indices = get_indexes_of_train('sttran', self.time_level, out_start_idx, self.close_len, self.period_len)
-        Xp = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        Xp = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         Xp = np.stack(Xp, axis=0).astype(np.float32)
-        Y = self.milan_data[out_start_idx: out_start_idx+self.pred_len]
+        Y = self.data[out_start_idx: out_start_idx+self.pred_len]
 
         Xc = Xc.reshape((Xc.shape[0], Xc.shape[1] * Xc.shape[2])).transpose(1, 0)
         Xp = Xp.reshape((self.period_len, self.close_len, Xp.shape[1] * Xp.shape[2])).transpose(2, 1, 0)
@@ -373,7 +404,7 @@ class MilanFGStgcnDataset(Dataset):
         此版本主要用于 STGCN 模型输入构造，通过历史数据预测未来值，不区分周期或趋势部分。
 
         参数：
-          - milan_data: 原始 Milan 数据，形状 (n_timestamps, n_grid_row, n_grid_col)。
+          - data: 原始 Milan 数据，形状 (n_timestamps, n_grid_row, n_grid_col)。
           - aggr_time (str): 时间聚合方式，通常为 None 或 'hour'。
           - close_len (int): 最近历史数据窗口长度。
           - period_len (int): 周期性数据窗口长度（可为0）。
@@ -387,17 +418,16 @@ class MilanFGStgcnDataset(Dataset):
           - Y: [batch_size, pred_len, 1, n_grid_row, n_grid_col]
         """
     def __init__(self,
-                 milan_data,
+                 data,
                  aggr_time: str,
                  close_len: int = 12,
                  period_len: int = 0,
                  trend_len: int = 0,
                  pred_len: int = 1):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
-        # if aggr_time not in [None, 'hour']:
-        #     raise ValueError("aggre_time must be None or 'hour'")
+
         self.time_level = aggr_time
-        self.milan_data = milan_data
+        self.data = data
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
@@ -405,7 +435,7 @@ class MilanFGStgcnDataset(Dataset):
         self.pred_len = pred_len
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.pred_len
+        return len(self.data)+1 - self.in_len - self.pred_len
 
     def __getitem__(self, idx):
         # 计算预测起始时间点的索引，通常 idx 表示样本编号，
@@ -413,7 +443,7 @@ class MilanFGStgcnDataset(Dataset):
         out_start_idx = idx + self.in_len
 
         # 获取单个时间步数据的空间形状，例如 (n_grid_row, n_grid_col)
-        slice_shape = self.milan_data.shape[1:]
+        slice_shape = self.data.shape[1:]
 
         # 计算需要的时间索引列表，用于获取历史数据窗口。
         # get_indexes_of_train 是一个辅助函数，根据传入的参数（时间级别、起始索引、历史长度、周期长度、趋势长度）
@@ -425,8 +455,8 @@ class MilanFGStgcnDataset(Dataset):
 
         # 利用列表推导构造输入数据 X
         # 对于列表中的每个索引，如果索引 i 小于 0，则填充一个与单个时间步数据同样形状的全零数组；
-        # 否则取 self.milan_data[i] 对应的时间步数据
-        X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        # 否则取 self.data[i] 对应的时间步数据
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         # 将列表 X 堆叠成一个 NumPy 数组，并转换为 float32 类型
         X = np.stack(X, axis=0).astype(np.float32)
         # 将 X reshape 成三维数组，其形状变为 (n_timestamps, 1, n_grid_row * n_grid_col)
@@ -434,7 +464,7 @@ class MilanFGStgcnDataset(Dataset):
         X = X.reshape((X.shape[0], -1, X.shape[3] * X.shape[2]))
 
         # 获取预测目标 Y，从 out_start_idx 开始，取 self.pred_len 个连续时间步的数据
-        Y = self.milan_data[out_start_idx: out_start_idx + self.pred_len]
+        Y = self.data[out_start_idx: out_start_idx + self.pred_len]
 
         # 处理 close（最近历史数据）部分：
         # X[:self.close_len] 取输入数据中前 close_len 个时间步，
@@ -459,39 +489,30 @@ class MilanFGStgcnDataset(Dataset):
             Xt = X[self.close_len + self.period_len: self.close_len + self.period_len + self.trend_len].transpose(2, 1, 0)
             return [Xc, Xp, Xt], Y
 
-
-class MilanMyWATDataset(Dataset):
+class MilanGraphLearnVAEDataset(Dataset):
+    # X和Y是完全一致的，因为目标是学习图重建X
     # X: [batch_size, n_grid*n_row, close_len]
-    # Y: [batch_size, n_grid*n_row, pred_len]
-    def __init__(self,
-                 milan_data,
-                 aggr_time: str,
-                 close_len: int = 12,
-                 period_len: int = 0,
-                 trend_len: int = 0,
-                 pred_len: int = 1):
-        # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
-        # if aggr_time not in [None, 'hour']:
-        #     raise ValueError("aggre_time must be None or 'hour'")
+    # Y: [batch_size, n_grid*n_row, close_len]
+    def __init__(self, data, aggr_time, close_len, period_len,
+                                             trend_len):
         self.time_level = aggr_time
-        self.milan_data = milan_data
+        self.data = data
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
         self.in_len = close_len
-        self.pred_len = pred_len
+        self.pred_len = close_len
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.pred_len
+        return len(self.data) + 1 - self.in_len - self.pred_len
 
     def __getitem__(self, idx):
-
         # 计算预测起始时间点的索引，通常 idx 表示样本编号，
         # 而 self.in_len 表示用于输入历史数据的长度，因此 out_start_idx 为历史数据之后的第一个预测时间点
         out_start_idx = idx + self.in_len
 
         # 获取单个时间步数据的空间形状，例如 (n_grid_row, n_grid_col)
-        slice_shape = self.milan_data.shape[1:]
+        slice_shape = self.data.shape[1:]
 
         # 计算需要的时间索引列表，用于获取历史数据窗口。
         # get_indexes_of_train 是一个辅助函数，根据传入的参数（时间级别、起始索引、历史长度、周期长度、趋势长度）
@@ -503,34 +524,31 @@ class MilanMyWATDataset(Dataset):
 
         # 利用列表推导构造输入数据 X
         # 对于列表中的每个索引，如果索引 i 小于 0，则填充一个与单个时间步数据同样形状的全零数组；
-        # 否则取 self.milan_data[i] 对应的时间步数据
-        X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        # 否则取 self.data[i] 对应的时间步数据
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         # 将列表 X 堆叠成一个 NumPy 数组，并转换为 float32 类型
         X = np.stack(X, axis=0).astype(np.float32)
         # 将 X reshape 成三维数组，其形状变为 (n_timestamps, 1, n_grid_row * n_grid_col)
         # 这里将每个时间步的二维空间数据展平成一维，第二维保留为单个通道
         X = X.reshape((X.shape[0], 1, X.shape[3] * X.shape[2])).squeeze().transpose(1, 0)
+        Y = X
+        return X, Y
 
-        # 获取预测目标 Y，从 out_start_idx 开始，取 self.pred_len 个连续时间步的数据
-        Y = self.milan_data[out_start_idx: out_start_idx + self.pred_len]
-        Y = Y.reshape((Y.shape[0], 1, Y.shape[3] * Y.shape[2])).squeeze().transpose(1, 0)
-        return X,Y
 
-class MilanSCOPEDataset(Dataset):
-    # X: [batch_size, n_grid*n_row, close_len, services]
-    # Y: [batch_size, n_grid*n_row, pred_len, services]
+class MilanMyWATDataset(Dataset):
+    # X: [batch_size, n_grid*n_row, close_len]
+    # Y: [batch_size, n_grid*n_row, pred_len]
     def __init__(self,
-                 milan_data,
+                 data,
                  aggr_time: str,
-                 close_len: int = 16,
+                 close_len: int = 6,
                  period_len: int = 0,
                  trend_len: int = 0,
-                 pred_len: int = 8):
+                 pred_len: int = 3):
         # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
-        # if aggr_time not in [None, 'hour']:
-        #     raise ValueError("aggre_time must be None or 'hour'")
+
         self.time_level = aggr_time
-        self.milan_data = milan_data
+        self.data = data
         self.close_len = close_len
         self.period_len = period_len
         self.trend_len = trend_len
@@ -538,7 +556,7 @@ class MilanSCOPEDataset(Dataset):
         self.pred_len = pred_len
 
     def __len__(self):
-        return len(self.milan_data)+1 - self.in_len - self.pred_len
+        return len(self.data) + 1 - self.in_len - self.pred_len
 
     def __getitem__(self, idx):
 
@@ -547,57 +565,222 @@ class MilanSCOPEDataset(Dataset):
         out_start_idx = idx + self.in_len
 
         # 获取单个时间步数据的空间形状，例如 (n_grid_row, n_grid_col)
-        slice_shape = self.milan_data.shape[1:]
+        slice_shape = self.data.shape[1:]
 
-        # 计算需要的时间索引列表，[close_len, period_len, trend_len]。
+        # 计算需要的时间索引列表，用于获取历史数据窗口。
         # get_indexes_of_train 是一个辅助函数，根据传入的参数（时间级别、起始索引、历史长度、周期长度、趋势长度）
         # 返回一组时间索引，通常这些索引指向历史数据点
         indices = get_indexes_of_train('default', self.time_level, out_start_idx,
                                        self.close_len, self.period_len, self.trend_len)
-        # 将索引列表反转（可能是为了让数据顺序从最早到最新）
+        # 将索引列表反转，变成从晚到早
         indices.reverse()
 
-        # 利用列表推导构造输入数据 X
-        # 对于列表中的每个索引，如果索引 i 小于 0，则填充一个与单个时间步数据同样形状的全零数组；
-        # 否则取 self.milan_data[i] 对应的时间步数据
-        X = [self.milan_data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        # 利用列表推导构造输入数据 X，从 out_start_idx 开始，往前取多个连续时间步的数据
+        # 对于列表中的每个索引，
+        # - 如果索引 i 小于 0，则填充一个全零数组;
+        # - 如果索引 i 大于等于 0，取 self.data[i] 对应的时间步数据
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
         # 将列表 X 堆叠成一个 NumPy 数组，并转换为 float32 类型
         X = np.stack(X, axis=0).astype(np.float32)
         # 将 X reshape 成三维数组，其形状变为 (n_timestamps, 1, n_grid_row * n_grid_col)
+        # 这里将每个时间步的二维空间数据展平成一维，第二维保留为单个通道
+        X = X.reshape((X.shape[0], 1, X.shape[3] * X.shape[2])).squeeze().transpose(1, 0)
+        # 获取预测目标 Y，从 out_start_idx 开始，往后取 self.pred_len 个连续时间步的数据
+        Y = self.data[out_start_idx: out_start_idx + self.pred_len]
+        Y = Y.reshape((Y.shape[0], 1, Y.shape[3] * Y.shape[2])).squeeze().transpose(1, 0)
+        return X,Y
+
+
+class MilanMyWATTFDataset(Dataset):
+    # X: [batch_size, n_grid * n_row, close_len, traffic + timefeatures]
+    # Y: [batch_size, n_grid * n_row, pred_len, traffic + timefeatures]
+    def __init__(self,
+                 data,
+                 aggr_time: str,
+                 close_len: int = 6,
+                 period_len: int = 0,
+                 trend_len: int = 0,
+                 pred_len: int = 3,
+                 service_dim: int = 1, # 业务种类数
+                 ):
+        self.time_level = aggr_time
+        self.data = data
+        self.close_len = close_len
+        self.period_len = period_len
+        self.trend_len = trend_len
+        self.in_len = close_len
+        self.pred_len = pred_len
+        self.service_dim = service_dim
+
+    def __len__(self):
+        return len(self.data) + 1 - self.in_len - self.pred_len
+
+    def __getitem__(self, idx):
+
+        # 计算预测起始时间点的索引，通常 idx 表示样本编号，
+        # 而 self.in_len 表示用于输入历史数据的长度，因此 out_start_idx 为历史数据之后的第一个预测时间点
+        out_start_idx = idx + self.in_len
+
+        # 获取单个时间步数据的空间形状，例如 (n_grid_row, n_grid_col)
+        slice_shape = self.data.shape[1:]
+
+        # 计算需要的时间索引列表，用于获取历史数据窗口。
+        # get_indexes_of_train 是一个辅助函数，根据传入的参数（时间级别、起始索引、历史长度、周期长度、趋势长度）
+        # 返回一组时间索引，通常这些索引指向历史数据点
+        indices = get_indexes_of_train('default', self.time_level, out_start_idx,
+                                       self.close_len, self.period_len, self.trend_len)
+        # 将索引列表反转，变成从晚到早
+        indices.reverse()
+
+        # 利用列表推导构造输入数据 X，从 out_start_idx 开始，往前取多个连续时间步的数据
+        # 对于列表中的每个索引，
+        # - 如果索引 i 小于 0，则填充一个全零数组;
+        # - 如果索引 i 大于等于 0，取 self.data[i] 对应的时间步数据
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        # 将列表 X 堆叠成一个 NumPy 数组，并转换为 float32 类型
+        X = np.stack(X, axis=0).astype(np.float32)
+        # 将 X reshape 成三维数组，其形状变为 (n_timestamps, 1, n_grid_row * n_grid_col)
+        # 这里将每个时间步的二维空间数据展平成一维，第二维保留为单个通道
+        X = X.reshape((X.shape[0], -1, X.shape[3] * X.shape[2])) # (T,F,N)
+        X = X.transpose(2,0,1) # (N,T,F)
+
+        # 获取预测目标 Y，从 out_start_idx 开始，往后取 self.pred_len 个连续时间步的数据
+        Y = self.data[out_start_idx: out_start_idx + self.pred_len]
+        Y = Y.reshape((Y.shape[0], -1, Y.shape[3] * Y.shape[2]))
+        Y = Y.transpose(2,0,1) # (N,T,F)
+        Y = Y[:, :, :self.service_dim]
+        return X, Y
+
+class MilanSCOPEDataset(Dataset):
+    # X: [batch_size, n_grid*n_row, close_len, services]
+    # Y: [batch_size, n_grid*n_row, pred_len, services]
+    def __init__(self,
+                 data,
+                 aggr_time: str,
+                 close_len: int = 16,
+                 period_len: int = 0,
+                 trend_len: int = 0,
+                 pred_len: int = 8):
+        # 3d array of shape (n_timestamps, n_grid_row, n_grid_col)
+
+        self.time_level = aggr_time
+        self.data = data
+        self.close_len = close_len
+        self.period_len = period_len
+        self.trend_len = trend_len
+        self.in_len = close_len
+        self.pred_len = pred_len
+
+    def __len__(self):
+        return len(self.data)+1 - self.in_len - self.pred_len
+
+    def __getitem__(self, idx):
+
+        out_start_idx = idx + self.in_len
+        slice_shape = self.data.shape[1:]
+        indices = get_indexes_of_train('default', self.time_level, out_start_idx,
+                                       self.close_len, self.period_len, self.trend_len)
+        indices.reverse()
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        X = np.stack(X, axis=0).astype(np.float32)
         X = X.reshape((X.shape[0], -1, X.shape[3] * X.shape[2])).transpose(2, 0, 1)
 
-        # 获取预测目标 Y，从 out_start_idx 开始，取 self.pred_len 个连续时间步的数据
-        Y = self.milan_data[out_start_idx: out_start_idx + self.pred_len]
+        Y = self.data[out_start_idx: out_start_idx + self.pred_len]
         Y = Y.reshape((Y.shape[0], -1, Y.shape[3] * Y.shape[2])).transpose(2, 0, 1)
-        return X,Y
+        return X, Y
+
+
+class MilanSTSGNNTFDataset(Dataset):
+    # X: [batch_size, input_window, num_nodes, traffic_data||day_of_week||time_of_day]
+    # Y: [batch_size, output_window, num_nodes, 1]
+    def __init__(self,
+                 data,
+                 aggr_time: str,
+                 close_len: int = 6,
+                 period_len: int = 0,
+                 trend_len: int = 0,
+                 pred_len: int = 3,
+                 service_dim: int = 1, # 业务种类数
+                 ):
+        self.time_level = aggr_time
+        self.data = data
+        self.close_len = close_len
+        self.period_len = period_len
+        self.trend_len = trend_len
+        self.in_len = close_len
+        self.pred_len = pred_len
+        self.service_dim = service_dim # 业务种类数
+
+    def __len__(self):
+        return len(self.data) + 1 - self.in_len - self.pred_len
+
+    def __getitem__(self, idx):
+
+        # 计算预测起始时间点的索引，通常 idx 表示样本编号，
+        # 而 self.in_len 表示用于输入历史数据的长度，因此 out_start_idx 为历史数据之后的第一个预测时间点
+        out_start_idx = idx + self.in_len
+
+        # 获取单个时间步数据的空间形状，例如 (n_grid_row, n_grid_col)
+        slice_shape = self.data.shape[1:]
+
+        # 计算需要的时间索引列表，用于获取历史数据窗口。
+        # get_indexes_of_train 是一个辅助函数，根据传入的参数（时间级别、起始索引、历史长度、周期长度、趋势长度）
+        # 返回一组时间索引，通常这些索引指向历史数据点
+        indices = get_indexes_of_train('default', self.time_level, out_start_idx,
+                                       self.close_len, self.period_len, self.trend_len)
+        # 将索引列表反转，变成从晚到早
+        indices.reverse()
+
+        # 利用列表推导构造输入数据 X，从 out_start_idx 开始，往前取多个连续时间步的数据
+        # 对于列表中的每个索引，
+        # - 如果索引 i 小于 0，则填充一个全零数组;
+        # - 如果索引 i 大于等于 0，取 self.data[i] 对应的时间步数据
+        X = [self.data[i] if i >= 0 else np.zeros(slice_shape) for i in indices]
+        # 将列表 X 堆叠成一个 NumPy 数组，并转换为 float32 类型
+        X = np.stack(X, axis=0).astype(np.float32)
+        # 将 X reshape 成三维数组，其形状变为 (n_timestamps, 1, n_grid_row * n_grid_col)
+        # 这里将每个时间步的二维空间数据展平成一维，第二维保留为单个通道
+        X = X.reshape((X.shape[0], -1, X.shape[3] * X.shape[2])) # (T,F,N)
+        X = X.transpose(0, 2, 1) # (T,N,F)
+
+        # 获取预测目标 Y，从 out_start_idx 开始，往后取 self.pred_len 个连续时间步的数据
+        Y = self.data[out_start_idx: out_start_idx + self.pred_len]
+        Y = Y.reshape((Y.shape[0], -1, Y.shape[3] * Y.shape[2]))
+        Y = Y.transpose(0, 2, 1) # (T,N,F)
+        Y = Y[:, :, :self.service_dim]
+        return X, Y
 
 if __name__ == '__main__':
     # 此处假设你已经构造了一个 MilanFG 数据集实例，传入必要参数
     # 参数中的 normalize, aggr_time, time_range, tele_column 等传给基类 Milan
-    milan_dataset = MilanFG(#format='',
-                            batch_size=32,
-                            aggr_time=None,
-                            time_range='all',
-                            tele_column='sms',
-                            close_len = 32, # => Xc (stgcn)
-                            period_len = 96, # => Xp (stgcn)
-                            trend_len = 0, # => Xt (stgcn)
-                            pred_len = 32,
-                            )
-    milan_dataset.prepare_data()
-    milan_dataset.setup()
+    dm = MilanFG(
+        format='default',
+        batch_size=32,
+        close_len=6,
+        period_len=0,
+        trend_len=0,
+        pred_len=3,
+        normalize=True,
+        aggr_time='hour',
+        time_range='all',
+    )
+    dm.prepare_data()
+    dm.setup()
+    grid_data = dm.milan_grid_data.reshape(1248, 400)
+    rank_2d = np.linalg.matrix_rank(grid_data)
+    print(f"二维矩阵的秩: {rank_2d}") # 308
 
     # 获取 train_dataloader
-    train_dl = milan_dataset.train_dataloader()
-    val_dl = milan_dataset.val_dataloader()
-    test_dl = milan_dataset.test_dataloader()
+    train_dl = dm.train_dataloader()
+    val_dl = dm.val_dataloader()
+    test_dl = dm.test_dataloader()
 
     print("Number of batches in train_dataloader:", len(train_dl))
     print("Number of batches in val_dataloader:", len(val_dl))
     print("Number of batches in test_dataloader:", len(test_dl))
 
     # 获取一个 batch，查看 X 和 Y 的维度
-    batch = next(iter(train_dl))
+    batch = next(iter(test_dl))
 
     # 这里假设 _get_dataset 返回的数据结构为 (X, Y)
     X, Y = batch
@@ -606,6 +789,6 @@ if __name__ == '__main__':
     # print("Batch Xp shape:", Xp.shape)
     # # print("Batch Xt shape:", Xt.shape)
     print("Batch X shape:", X.shape)
-    # print("Batch Y shape:", Y.shape)
+    print("Batch Y shape:", Y.shape)
 
-    A = milan_dataset.adj_mx
+    # A = dataset.adj_mx

@@ -2,6 +2,7 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
+from utils.registry import register
 import pandas as pd
 import matplotlib.pyplot as plt
 from models.STBase import STBase
@@ -21,6 +22,7 @@ from models.STBase import STBase
 #     if param.dim() > 1:
 #         nn.init.kaiming_normal_(param)
 
+@register('SCOPE')
 class SCOPE(STBase):
     def __init__(self,
                  num_nodes: int = 400, # 节点数目

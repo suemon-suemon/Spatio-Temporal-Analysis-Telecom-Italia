@@ -4,14 +4,13 @@ import torch.nn.functional as F
 from torch_geometric.io.planetoid import edge_index_from_dict
 from models.STBase import STBase
 import networkx as nx
-import os
 import pandas as pd
 from utils.funcs import *
 from scipy.sparse.linalg import eigs
 from utils.registry import register
 
-@register("LightSTGCN")
-class LightSTGCN(STBase):
+@register("SimpleSTGCN")
+class SimpleSTGCN(STBase):
     def __init__(self,
                  close_len: int = 6,
                  pred_len: int = 3,
@@ -19,14 +18,9 @@ class LightSTGCN(STBase):
                  cheb_k: int = 3,
                  period_len: int = 0,
                  trend_len: int = 0,
-                 grid_range: tuple = (0, 2, 0, 6),
                  *args, **kwargs):
-        super(LightSTGCN, self).__init__(*args, **kwargs)
+        super(SimpleSTGCN, self).__init__(*args, **kwargs)
 
-        self.pred_len = pred_len
-        self.period_len = period_len
-        self.trend_len = trend_len
-        self.seq_len = close_len + period_len + trend_len
 
         # 用网格图，k_average = 3.8
         # adj_mx = np.load("/data/scratch/jiayin/Adj_SmoothGL_Milan10Min_Internet.npy")
@@ -34,21 +28,21 @@ class LightSTGCN(STBase):
         # AdjKnn3_D29_Milan10Min_Internet.npy
         # AdjKnn4_D45_Milan10Min_Internet.npy
         # AdjKnn5_D59_Milan10Min_Internet.npy
-        self.n_row = grid_range[1] - grid_range[0] + 1
-        self.n_col = grid_range[3] - grid_range[2] + 1
-        G = nx.grid_2d_graph(self.n_row, self.n_col)
-        adj_mx = nx.adjacency_matrix(G)
-        # adj_mx = pd.read_csv("/home/jiayin/PycharmProjects/Spatio-Temporal-Analysis-Telecom-Italia/experiments/experiments/results/GLLowPass_04132226/A.csv").to_numpy()
-        self.edge_index = Adj2EdgeList(adj_mx)
+        G = nx.grid_2d_graph(20, 20)
+        adj_spatial = nx.adjacency_matrix(G)
+        # adj_spatial = pd.read_csv("/home/jiayin/PycharmProjects/Spatio-Temporal-Analysis-Telecom-Italia/experiments/experiments/results/GLLowPass_04132226/A.csv").to_numpy()
+
+        adj_temporal = pd.read_csv("/home/jiayin/PycharmProjects/Spatio-Temporal-Analysis-Telecom-Italia/experiments/experiments/results/GLLowPass_Temporal_04142037/A.csv").to_numpy()
+        # self.edge_index_spatial = Adj2EdgeList(adj_spatial)
+        # self.edge_index_temporal = Adj2EdgeList(adj_temporal)
 
         # Chebyshev Graph Convolution (ChebConv)
-        self.cheb_conv = cheb_conv(in_channels=1, out_channels = 64,
-                                  K = cheb_k, Adj=adj_mx)  # Chebyshev图卷积
+        self.cheb_conv_spatial = cheb_conv(in_channels=1, out_channels = 64,
+                                  K = cheb_k, Adj=adj_spatial)  # Chebyshev图卷积
 
         # Time Convolution (Conv2d for (N,T) convolution)
-        self.time_conv = nn.Conv2d(in_channels = 64, out_channels = feature_len,
-                                   kernel_size=(1, 3),
-                                   stride=(1, 1), padding=(0, 1))  # 时间卷积
+        self.cheb_conv_temporal = cheb_conv(in_channels=64, out_channels=64,
+                                            K=cheb_k, Adj=adj_temporal)  # 时间卷积
 
         # Residual Convolution (Conv2d for residual connection)
         self.residual_conv = nn.Conv2d(in_channels = 1, out_channels = feature_len,
@@ -60,6 +54,12 @@ class LightSTGCN(STBase):
         # Final Convolution (restoring F_in back)
         self.final_conv = nn.Conv2d(in_channels=close_len, out_channels=pred_len,
                                     kernel_size=(1, feature_len))  # 对F维度做卷积
+
+        self.pred_len = pred_len
+        self.period_len = period_len
+        self.trend_len = trend_len
+        self.seq_len = close_len + period_len + trend_len
+
         # Initialize parameters
         self.save_hyperparameters()
         for p in self.parameters():
@@ -70,29 +70,19 @@ class LightSTGCN(STBase):
 
     def forward(self, x):
 
-        # 如果是列表输入（多组件输入）
-        if isinstance(x, list):
-            xc = x[0]
-            xp = x[1] if len(x) > 1 else None
-            xt = x[2] if len(x) > 2 else None
-        else:
-            xc = x
-            xp = None
-            xt = None
+        if isinstance(x, list):  # 判断 x 是否是列表
+            x = x[0]  # 如果是列表，取出第一个元素
 
-        x = xc
-        # print(f"[DEBUG] shape(x): {x.shape}")
-        # torch.Size([32, 12, 1, 3, 7])
-
-        # (b, N, F_in, T)
+        # x (b, N, F_in, T)
         x_ori = x.permute(0, 2, 1, 3) # (b, F_in, N, T)
 
         # Step 1: Apply Chebyshev Convolution (ChebConv)
-        x = self.cheb_conv(x)  # (b, N, F_out, T)
+        x = self.cheb_conv_spatial(x)  # (b, N, F_out, T)
 
         # Step 2: Apply Time Convolution (Conv2d for T dimension)
-        x = x.permute(0, 2, 1, 3)  # (b, F_out, N, T)
-        x = self.time_conv(x)  # (b, F_out, N, T)
+        x = x.permute(0, 3, 2, 1) # (b, T, F_out, N)
+        x = self.cheb_conv_temporal(x)  # (b, T, F_out, N)
+        x = x.permute(0, 2, 3, 1)
 
         # Step 3: Residual Connection
         residual = self.residual_conv(x_ori)  # (b, F_out, N, T)
@@ -112,9 +102,54 @@ class LightSTGCN(STBase):
         return x
 
 class cheb_conv(nn.Module):
-
     def __init__(self, K, Adj, in_channels, out_channels):
         super(cheb_conv, self).__init__()
+        self.K = K
+        self.in_channels = in_channels # 固定是1，输入的每个节点的特征维度
+        self.out_channels = out_channels # nb_chev_filter, 默认是64，输出的每个节点的特征维度
+        self.Theta = nn.ParameterList([nn.Parameter(torch.FloatTensor(in_channels, out_channels)) for _ in range(K)])
+        L_tilde = scaled_Laplacian(Adj)
+        self.register_buffer("cheb_polynomials", torch.from_numpy(cheb_polynomial(L_tilde, K)))
+
+    def forward(self, x):
+
+        batch_size, num_of_vertices, in_channels, num_of_timesteps = x.shape
+
+        # Reshape the input tensor to combine batch_size and time steps
+        x_reshaped = x.reshape(batch_size * num_of_timesteps, num_of_vertices, in_channels)  # (batch_size * T, N, F_in)
+
+        # Prepare for accumulating results
+        output = torch.zeros(batch_size * num_of_timesteps, num_of_vertices, self.out_channels).type_as(x)  # (batch_size * T, N, F_out)
+
+        for k in range(self.K):  # For each Chebyshev polynomial
+            # Get the Chebyshev polynomial T_k (b, N, N)
+            T_k = self.cheb_polynomials[k].expand(batch_size, num_of_vertices, num_of_vertices)
+
+            # Expand T_k to match the shape of x_reshaped (b, T, N, N) @ (b * T, N, F_in)
+            T_k_expanded = T_k.unsqueeze(1).expand(batch_size, num_of_timesteps, num_of_vertices, num_of_vertices)  # (b, T, N, N)
+
+            # Reshape T_k_with_at to (b * T, N, N)
+            T_k_expanded = T_k_expanded.contiguous().view(batch_size * num_of_timesteps, num_of_vertices, num_of_vertices)
+
+            # Compute the graph signal multiplication: (b * T, N, N) @ (b * T, N, F_in) -> (b * T, N, F_in)
+            rhs = T_k_expanded.permute(0, 2, 1).matmul(x_reshaped)  # (b * T, N, F_in)
+
+            # Apply the linear transformation (b * T, N, F_in) @ (F_in, F_out) -> (b * T, N, F_out)
+            output = output + rhs.matmul(self.Theta[k])  # Accumulate results
+
+        # Reshape the output back to the original batch size and time steps
+        output = output.view(batch_size, num_of_timesteps, num_of_vertices, self.out_channels)  # (batch_size, T, N, F_out)
+
+        # Apply ReLU and transpose to get the final output
+        out = F.relu(output.permute(0, 2, 3, 1))  # (batch_size, N, F_out, T)
+
+        return out
+
+
+class cheb_conv_orignal(nn.Module):
+
+    def __init__(self, K, Adj, in_channels, out_channels):
+        super(cheb_conv_orignal, self).__init__()
         self.K = K
         self.in_channels = in_channels # 固定是1，输入的每个节点的特征维度
         self.out_channels = out_channels # nb_chev_filter, 默认是64，输出的每个节点的特征维度
@@ -166,8 +201,7 @@ def cheb_polynomial(L_tilde, K):
     return cheb_polynomials
 
 if __name__ == '__main__':
-    model = LightSTGCN(close_len=6, pred_len=3, feature_len=64, cheb_k=3)
-    x = torch.randn(32, 21, 1, 6)
+    model = SimpleSTGCN(close_len=6, pred_len=3,feature_len=64, cheb_k=3)
+    x = torch.randn(32, 400, 1, 6)
     y = model(x)
     print(y.shape)
-    # torch.Size([32, 3, 1, 21]), [B, pred_len, 1, N_all]
